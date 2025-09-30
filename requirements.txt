@@ -2,3 +2,4 @@ python-telegram-bot[job-queue]
 python-lottie # Untuk konversi .json ke .tgs.
 Pillow # Untuk manipulasi gambar dasar (misalnya untuk /removebg).
 rembg # Untuk menghapus background (jika Anda menggunakannya)
+requests
