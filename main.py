@@ -16,8 +16,8 @@ credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCO
 drive_service = build('drive', 'v3', credentials=credentials)
 
 # Setup TelegramClient
-api_id = 123456  # Bisa dummy, BOT_TOKEN sudah cukup
-api_hash = "dummyhash"
+api_id = 28235685  # Bisa dummy, BOT_TOKEN sudah cukup
+api_hash = "03c741f65092cb2ccdd9341b9b055f13"
 client = TelegramClient('bot', api_id, api_hash).start(bot_token=BOT_TOKEN)
 
 # Event listener sederhana
@@ -41,3 +41,4 @@ async def handler(event):
 
 print("Bot siap dijalankan!")
 client.run_until_disconnected()
+
