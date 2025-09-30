@@ -1,80 +1,113 @@
 import os
 import json
-import subprocess
+import aiohttp
 from telethon import TelegramClient, events
 from telethon.tl.types import InputDocument
+from telethon.tl.functions.stickers import CreateStickerSetRequest, AddStickerToSetRequest
+from telethon.errors import StickerSetInvalidError
 
-# ================= CONFIG =================
-BOT_TOKEN = "8319183574:AAHIi3SX218DNqS-owUcQ9Xyvc_D4Mk14Rw"
-API_ID = 28235685  # isi dengan api_id Telegram
-API_HASH = "03c741f65092cb2ccdd9341b9b055f13"
+# ===== CONFIG =====
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+REMOVE_BG_KEY = os.getenv("REMOVE_BG_KEY")
+USERNAME = "r3nsian"
 
-DOWNLOAD_DIR = "downloads"
-PACK_NAME = "rensci_emoji_r3nsian"
-PACK_TITLE = "Rensci Emoji @r3nsian"
+DOWNLOADS = "downloads"
+os.makedirs(DOWNLOADS, exist_ok=True)
 
-# ================= CLIENT =================
 client = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-COMMANDS = {
-    "/new": "Kirim file .tgs untuk membuat emoji pack otomatis",
-    "/json2tgs": "Kirim file .json untuk dikonversi menjadi .tgs",
-    "/help": "Menampilkan semua command aktif"
-}
+HELP_TEXT = """
+🤖 Selamat datang!
+Perintah:
+/start - Menampilkan pesan ini
+/json2tgs - Convert file .json ke .tgs
+/removebg - Hapus background gambar
+Kirim file .tgs langsung untuk dijadikan emoji pack otomatis!
+"""
 
-# ================= HELP =================
-@client.on(events.NewMessage(pattern="/start|/help"))
+# ===== START =====
+@client.on(events.NewMessage(pattern='/start'))
 async def start(event):
-    text = "Selamat datang di Rensci Emoji Bot!\n\nCommand aktif:\n"
-    for cmd, desc in COMMANDS.items():
-        text += f"{cmd} → {desc}\n"
-    await event.reply(text)
+    await event.reply(HELP_TEXT)
 
-# ================= UTILS =================
-def json_to_tgs(json_path, tgs_path):
-    """
-    Konversi JSON Lottie menjadi .tgs menggunakan lottie_convert.py
-    Pastikan sudah ada lottie_convert.py di project atau install lottie2tgs
-    """
-    try:
-        subprocess.run(["lottie_convert.py", json_path, tgs_path], check=True)
-        return True
-    except Exception as e:
-        print("Error convert:", e)
-        return False
+# ===== JSON -> TGS =====
+@client.on(events.NewMessage(pattern='/json2tgs'))
+async def json2tgs(event):
+    if event.message.file and event.message.file.name.endswith(".json"):
+        file_path = await event.download_media(DOWNLOADS)
+        tgs_path = file_path.replace(".json", ".tgs")
+        try:
+            # Minify JSON
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+            with open(tgs_path, 'w') as f:
+                json.dump(data, f, separators=(',', ':'))
+            await event.reply(f"File berhasil di-convert: {tgs_path}")
+        except Exception as e:
+            await event.reply(f"Gagal convert JSON ke TGS: {str(e)}")
+    else:
+        await event.reply("Kirim file .json Lottie!")
 
-# ================= HANDLER .TGS =================
-@client.on(events.NewMessage(pattern="/new"))
-async def new_tgs_cmd(event):
-    await event.reply("Silakan kirim file .tgs untuk membuat emoji pack otomatis...")
+# ===== REMOVE BG =====
+@client.on(events.NewMessage(pattern='/removebg'))
+async def removebg(event):
+    if event.message.file and event.message.file.name.endswith((".png",".jpg",".jpeg")):
+        file_path = await event.download_media(DOWNLOADS)
+        output_path = file_path.replace(".", "_nobg.")
+        try:
+            async with aiohttp.ClientSession() as session:
+                with open(file_path, "rb") as f:
+                    files = {"image_file": f}
+                    headers = {"X-Api-Key": REMOVE_BG_KEY}
+                    async with session.post("https://api.remove.bg/v1.0/removebg", data=files, headers=headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.read()
+                            with open(output_path, "wb") as out:
+                                out.write(data)
+                            await event.reply(f"Background dihapus! File: {output_path}")
+                        else:
+                            text = await resp.text()
+                            await event.reply(f"Gagal remove.bg: {text}")
+        except Exception as e:
+            await event.reply(f"Error: {str(e)}")
+    else:
+        await event.reply("Kirim gambar .png/.jpg/.jpeg untuk dihapus backgroundnya!")
 
+# ===== TGS -> EMOJI PACK =====
 @client.on(events.NewMessage)
 async def tgs_handler(event):
-    if event.file and event.file.name.endswith(".tgs"):
-        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-        path = f"{DOWNLOAD_DIR}/{event.file.name}"
-        await event.download_media(path)
-        await event.reply(f"File diterima: {path}\nEmoji pack siap dibuat!")
-        # TODO: implement auto pack + replace + link generation
+    if event.message.file and event.message.file.name.endswith(".tgs"):
+        file_path = await event.download_media(DOWNLOADS)
+        await event.reply(f"File diterima: {file_path}\nMembuat emoji pack...")
 
-# ================= HANDLER JSON =================
-@client.on(events.NewMessage(pattern="/json2tgs"))
-async def json2tgs_cmd(event):
-    await event.reply("Silakan kirim file .json untuk dikonversi menjadi .tgs...")
+        pack_name = f"rensci_emoji_{USERNAME}"
+        pack_title = f"Rensci Emoji @{USERNAME}"
 
-@client.on(events.NewMessage)
-async def json_handler(event):
-    if event.file and event.file.name.endswith(".json"):
-        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-        json_path = f"{DOWNLOAD_DIR}/{event.file.name}"
-        tgs_path = f"{DOWNLOAD_DIR}/{os.path.splitext(event.file.name)[0]}.tgs"
-        await event.download_media(json_path)
-        await event.reply(f"File JSON diterima: {json_path}\nMengonversi ke .tgs ...")
-        if json_to_tgs(json_path, tgs_path):
-            await event.reply(f"Selesai! File TGS siap: {tgs_path}")
-        else:
-            await event.reply("Gagal mengonversi JSON menjadi TGS.")
+        input_doc = InputDocument(
+            id=event.message.file.id,
+            access_hash=event.message.file.access_hash,
+            file_reference=event.message.file.file_reference
+        )
 
-# ================= RUN =================
-print("Bot berjalan...")
+        try:
+            # Buat pack baru
+            await client(CreateStickerSetRequest(
+                user_id=await client.get_me(),
+                title=pack_title,
+                short_name=pack_name,
+                stickers=[input_doc],
+                animated=True
+            ))
+            await event.reply(f"Emoji pack dibuat!\nLink: t.me/addemoji/{pack_name}")
+        except StickerSetInvalidError:
+            # Pack sudah ada -> tambahkan sticker
+            await client(AddStickerToSetRequest(
+                stickers=[input_doc],
+                stickerset=pack_name
+            ))
+            await event.reply(f"Sticker ditambahkan ke pack!\nLink: t.me/addemoji/{pack_name}")
+
+client.start()
 client.run_until_disconnected()
