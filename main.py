@@ -67,5 +67,4 @@ async def handle_json(client, message: Message):
         if size_warning:
             caption += "\n⚠️ File .tgs lebih dari 64KB, mungkin tidak bisa dijadikan emoji premium."
 
-        # Kirim hasil TGS
-        sent =
+        # Kirim hasil TGS sent =
