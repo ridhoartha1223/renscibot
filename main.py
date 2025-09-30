@@ -1,62 +1,53 @@
-import os
-import asyncio
+import json
+import gzip
 from telethon import TelegramClient, events
-from telethon.tl.types import InputDocument
+from telethon.tl.types import DocumentAttributeFilename
 
-# --- Konfigurasi ---
-API_ID = int(os.environ.get("API_ID", "28235685"))
-API_HASH = os.environ.get("API_HASH", "03c741f65092cb2ccdd9341b9b055f13")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token_here")
+# ================== CONFIG ==================
+API_ID = 28235685        # ganti dengan api_id mu
+API_HASH = "03c741f65092cb2ccdd9341b9b055f13"  # ganti dengan api_hash mu
+BOT_TOKEN = "8319183574:AAHIi3SX218DNqS-owUcQ9Xyvc_D4Mk14Rw"
+# ===========================================
 
-# --- Inisialisasi client ---
 client = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-# --- Command menu ---
-COMMANDS = {
-    "/new": "Buat pack emoji baru (kirim file .tgs)",
-    "/json2tgs": "Convert file .json ke .tgs",
-    "/removebg": "Hapus background gambar",
-    "/link": "Dapatkan link emoji pack",
-    "/help": "Lihat daftar perintah"
-}
+# Fungsi convert JSON → TGS
+def json_to_tgs(json_bytes, output_name="emoji.tgs"):
+    data = json.loads(json_bytes)
+    json_min = json.dumps(data, separators=(',', ':'))
+    tgs_bytes = gzip.compress(json_min.encode("utf-8"))
+    return tgs_bytes
 
-# --- Event /start ---
-@client.on(events.NewMessage(pattern='/start'))
-async def start_handler(event):
-    menu_text = "\n".join([f"{cmd} → {desc}" for cmd, desc in COMMANDS.items()])
-    await event.respond(
-        "Halo! Aku Rensci Emoji Bot 🤖\n"
-        "Aku bisa bantu kamu membuat emoji Telegram premium dengan cepat.\n\n"
-        "Berikut daftar perintah yang tersedia:\n\n"
-        f"{menu_text}"
+# /start
+@client.on(events.NewMessage(pattern="/start"))
+async def start(event):
+    await event.reply(
+        "Halo! Kirim file .json Lottie kamu, aku akan ubah jadi .tgs siap untuk @Stickers!"
     )
 
-# --- Event /help ---
-@client.on(events.NewMessage(pattern='/help'))
-async def help_handler(event):
-    menu_text = "\n".join([f"{cmd} → {desc}" for cmd, desc in COMMANDS.items()])
-    await event.respond(f"Daftar perintah:\n\n{menu_text}")
+# Terima file JSON
+@client.on(events.NewMessage)
+async def handle_file(event):
+    if event.file and event.file.name.endswith(".json"):
+        await event.reply("Menerima file, sedang proses convert ke TGS...")
+        file_path = await event.download_media()
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                json_bytes = f.read()
+            tgs_bytes = json_to_tgs(json_bytes)
+            # Kirim balik sebagai .tgs
+            await client.send_file(
+                event.chat_id,
+                tgs_bytes,
+                force_document=True,
+                attributes=[DocumentAttributeFilename("emoji.tgs")]
+            )
+        except Exception as e:
+            await event.reply(f"Gagal convert: {e}")
+    else:
+        if event.message.message.startswith("/"):
+            return
+        await event.reply("Kirim file .json Lottie saja ya!")
 
-# --- Event /new ---
-@client.on(events.NewMessage(pattern='/new'))
-async def new_handler(event):
-    await event.respond("Kirim file .tgs kamu sekarang untuk membuat emoji pack!")
-
-# --- Event /json2tgs ---
-@client.on(events.NewMessage(pattern='/json2tgs'))
-async def json2tgs_handler(event):
-    await event.respond("Kirim file .json kamu, nanti aku akan convert ke .tgs!")
-
-# --- Event /removebg ---
-@client.on(events.NewMessage(pattern='/removebg'))
-async def removebg_handler(event):
-    await event.respond("Kirim file gambar kamu, aku akan hapus background-nya!")
-
-# --- Event /link ---
-@client.on(events.NewMessage(pattern='/link'))
-async def link_handler(event):
-    await event.respond("Aku akan buatkan link emoji pack kamu setelah selesai.")
-
-# --- Menjalankan client ---
-print("Bot sedang berjalan...")
+print("Bot berjalan...")
 client.run_until_disconnected()
