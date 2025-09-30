@@ -257,8 +257,6 @@ def main() -> None:
    tgs_handler = ConversationHandler(
        entry_points=[MessageHandler(filters.Document.TGS, handle_tgs_file)],
 AttributeError: type object 'Document' has no attribute 'TGS'
-entry_points=[MessageHandler(filters.Document.TGS, handle_tgs_file)],
-AttributeError: type object 'Document' has no attribute 'TGS'
 )
 
    # 2. Tambahkan Handlers
@@ -278,4 +276,5 @@ AttributeError: type object 'Document' has no attribute 'TGS'
 
 if __name__ == "__main__":
    main()
+
 
