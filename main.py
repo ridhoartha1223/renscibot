@@ -293,6 +293,7 @@ def main() -> None:
     print("Bot is running...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-if name == "__main__":
+if __name__ == "__main__":
     main()
+
 
