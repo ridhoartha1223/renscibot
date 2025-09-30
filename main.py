@@ -258,9 +258,14 @@ def main() -> None:
 
     application = Application.builder().token(BOT_TOKEN).build()
     
+    # PERBAIKAN: Mengganti filters.MIMETYPE dengan filters.MimeType
+    
     # Definisikan Filter Kustom
-    TGS_FILTER = filters.Document.ALL & filters.MIMETYPE("application/x-tgsticker")
-    JSON_FILTER = filters.Document.ALL & filters.MIMETYPE("application/json")
+    # TGS: application/x-tgsticker
+    TGS_FILTER = filters.Document.ALL & filters.MimeType("application/x-tgsticker")
+    
+    # JSON: application/json
+    JSON_FILTER = filters.Document.ALL & filters.MimeType("application/json")
     
     # Conversation Handler untuk proses .tgs
     tgs_handler = ConversationHandler(
@@ -288,5 +293,6 @@ def main() -> None:
     print("Bot is running...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-if __name__ == "__main__":
+if name == "__main__":
     main()
+
