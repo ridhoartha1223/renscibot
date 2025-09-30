@@ -7,10 +7,10 @@ from telethon.tl.functions.stickers import CreateStickerSetRequest, AddStickerTo
 from telethon.errors import StickerSetInvalidError
 
 # ===== CONFIG =====
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-REMOVE_BG_KEY = os.getenv("REMOVE_BG_KEY")
+BOT_TOKEN = os.getenv("8319183574:AAHIi3SX218DNqS-owUcQ9Xyvc_D4Mk14Rw")
+API_ID = int(os.getenv("28235685"))
+API_HASH = os.getenv("03c741f65092cb2ccdd9341b9b055f13")
+REMOVE_BG_KEY = os.getenv("ikoTRQesM3BffWcCc5rRygRP")
 USERNAME = "r3nsian"
 
 DOWNLOADS = "downloads"
@@ -111,3 +111,4 @@ async def tgs_handler(event):
 
 client.start()
 client.run_until_disconnected()
+
