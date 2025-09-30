@@ -258,17 +258,18 @@ def main() -> None:
 
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # PERBAIKAN: Mengganti filters.MIMETYPE dengan filters.MimeType
+    # PERBAIKAN: Mengganti filters.MimeType() dengan filter regex pada nama file
     
     # Definisikan Filter Kustom
-    # TGS: application/x-tgsticker
-    TGS_FILTER = filters.Document.ALL & filters.MimeType("application/x-tgsticker")
+    # TGS: Cek dokumen yang memiliki ekstensi .tgs
+    TGS_FILTER = filters.Document.ALL & filters.Regex(r"\.tgs$")
     
-    # JSON: application/json
-    JSON_FILTER = filters.Document.ALL & filters.MimeType("application/json")
+    # JSON: Cek dokumen yang memiliki ekstensi .json
+    JSON_FILTER = filters.Document.ALL & filters.Regex(r"\.json$")
     
     # Conversation Handler untuk proses .tgs
     tgs_handler = ConversationHandler(
+        # Menggunakan TGS_FILTER berbasis regex
         entry_points=[MessageHandler(TGS_FILTER, handle_tgs_file)], 
         states={
             GET_PACK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_pack_name)],
@@ -283,6 +284,7 @@ def main() -> None:
     
     # Handlers untuk /json2tgs (mendukung reply atau caption)
     application.add_handler(CommandHandler("json2tgs", json2tgs_command))
+    # Menggunakan JSON_FILTER berbasis regex
     application.add_handler(MessageHandler(JSON_FILTER & filters.Caption("json2tgs"), json2tgs_command))
 
     # Handlers untuk /removebg (mendukung reply ke foto atau dokumen, atau caption)
@@ -293,7 +295,9 @@ def main() -> None:
     print("Bot is running...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-if __name__ == "__main__":
+if name == "__main__":
     main()
+    main()
+
 
 
