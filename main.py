@@ -256,18 +256,17 @@ def main() -> None:
    # Conversation Handler untuk proses .tgs
    tgs_handler = ConversationHandler(
        entry_points=[MessageHandler(filters.Document.TGS, handle_tgs_file)],
-       states={
-           GET_PACK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_pack_name)],
-       },
-       fallbacks=[MessageHandler(filters.ALL, cancel_tgs)],
-   )
+AttributeError: type object 'Document' has no attribute 'TGS'
+entry_points=[MessageHandler(filters.Document.TGS, handle_tgs_file)],
+AttributeError: type object 'Document' has no attribute 'TGS'
+)
 
    # 2. Tambahkan Handlers
    application.add_handler(CommandHandler("start", start_command))
    application.add_handler(tgs_handler)
    
    # Handlers untuk command file
-   application.add_handler(CommandHandler("json2tgs", json2tgs_command))
+   application.add_handler(CommandHandler("json2tgs", json2tgs_command)
    application.add_handler(MessageHandler(filters.Document.JSON & filters.Caption("json2tgs"), json2tgs_command))
 
    application.add_handler(CommandHandler("removebg", removebg_command))
@@ -279,3 +278,4 @@ def main() -> None:
 
 if __name__ == "__main__":
    main()
+
