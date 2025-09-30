@@ -1,10 +1,12 @@
 import os
 import logging
 import re
-from telegram import Update, ForceReply
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
-from removebg import RemoveBg
+import subprocess
 from typing import Optional
+from telegram import Update, ForceReply, ChatAction
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
+from telegram.constants import ParseMode, ChatAction
+from removebg import RemoveBg
 
 # --- Konfigurasi Awal ---
 logging.basicConfig(
@@ -22,105 +24,128 @@ GET_PACK_NAME = 1
 # Pastikan folder downloads ada
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
-# --- FUNGSI DUMMY (INTEGRASI LOTTIE/TGS) ---
-# PERINGATAN: Anda WAJIB mengganti fungsi di bawah ini dengan implementasi
-# yang benar (misalnya, menggunakan subprocess untuk memanggil lottie-min/lottie-rs)
+# --- FUNGSI IMPLEMENTASI LOTTIE/TGS NYATA ---
+
+def run_lottie_min(input_path: str, output_path: str):
+    """Menjalankan command lottie-min untuk optimasi/konversi."""
+    command = ['lottie-min', input_path, '-o', output_path]
+    logging.info(f"Running lottie-min command: {' '.join(command)}")
+    
+    # Jalankan command dengan timeout
+    result = subprocess.run(command, capture_output=True, text=True, timeout=90) 
+    
+    if result.returncode != 0:
+        logging.error(f"lottie-min failed. Stderr: {result.stderr}")
+        # Hapus file output yang mungkin rusak
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        
+        # Coba ekstrak pesan error spesifik
+        error_msg = result.stderr.strip()
+        if "must be an absolute path" in error_msg:
+             user_friendly_error = "File Lottie/JSON tampaknya memiliki masalah path internal atau format."
+        elif "JSON is malformed" in error_msg:
+             user_friendly_error = "Struktur file JSON/Lottie rusak atau tidak valid."
+        else:
+             user_friendly_error = f"Kesalahan pemrosesan Lottie (Code {result.returncode})."
+             
+        raise Exception(user_friendly_error)
+        
+    logging.info(f"lottie-min finished successfully.")
 
 def optimize_tgs_file(file_path: str) -> str:
-    """
-    Simulasi: Menerima path .tgs, optimasi, dan mengembalikan path baru.
-    >>> GANTI DENGAN KODE OPTIMASI LOTTIE NYATA DI SINI <<<
-    """
-    logging.info(f"Optimizing file: {file_path}")
-    # Jika optimasi gagal, Anda bisa raise Exception di sini.
-    # Untuk simulasi, kita kembalikan path yang sama.
-    return file_path 
+    """Menerima path .tgs, optimasi, dan mengembalikan path baru."""
+    optimized_path = os.path.join(DOWNLOADS_DIR, f"opt_{os.urandom(4).hex()}.tgs")
+    run_lottie_min(file_path, optimized_path)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    return optimized_path
 
 def convert_json_to_tgs_file(json_path: str) -> str:
-    """
-    Simulasi: Menerima path .json, konversi ke .tgs, dan mengembalikan path .tgs.
-    >>> GANTI DENGAN KODE KONVERSI LOTTIE NYATA DI SINI <<<
-    """
-    logging.info(f"Converting file: {json_path}")
-    tgs_path = json_path.replace(".json", ".tgs")
-    # Untuk simulasi: membuat file dummy .tgs
-    with open(tgs_path, 'w') as f:
-        f.write("DUMMY TGS CONTENT") 
-    return tgs_path 
+    """Menerima path .json, konversi ke .tgs, dan mengembalikan path .tgs."""
+    tgs_path = os.path.join(DOWNLOADS_DIR, f"conv_{os.urandom(4).hex()}.tgs")
+    run_lottie_min(json_path, tgs_path)
+    if os.path.exists(json_path):
+        os.remove(json_path)
+    return tgs_path
+
 
 # --- HANDLER: /start (Feature 1) ---
 async def start_command(update: Update, context) -> None:
     """Menampilkan pesan selamat datang, command, dan kegunaan."""
+    
+    # Kirim Chat Action: TYPING
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+
     welcome_message = (
-        "**Selamat Datang di Bot Emoji Animasi (.tgs) Penuh Fitur! 🤖**\n\n"
-        "**Daftar Command & Fitur:**\n"
-        "1. **Kirim file .tgs:** Bot akan **otomatis mengoptimalkan** ukurannya, "
-        "meminta nama paket, dan membuat *share link* `t.me/addemoji/...`.\n"
-        "2. **`/json2tgs`:** Kirim atau balas ke file **.json** untuk di-convert menjadi **.tgs**.\n"
-        "3. **`/removebg`:** Kirim atau balas ke file **gambar (.png/.jpg)** untuk menghapus *background*.\n"
+        "👋 **Selamat datang! Saya Bot Stiker Animasi (.tgs) Anda.**\n\n"
+        "Saya dapat membantu Anda membuat dan mengoptimalkan stiker animasi untuk Telegram.\n\n"
+        "**Cara Penggunaan:**\n"
+        "🔸 **Stiker .TGS:** Cukup kirim file **.tgs** Anda, dan saya akan secara otomatis "
+        "mengoptimalkan ukurannya, lalu meminta Anda membuat *share link* pack.\n"
+        "🔸 **Konversi:** Gunakan perintah **`/json2tgs`** dengan membalas file `.json` Anda.\n"
+        "🔸 **Background:** Gunakan **`/removebg`** dengan membalas foto (.jpg/.png) untuk menghapus latar belakang.\n\n"
+        "Tekan tombol Menu (`/`) di bawah untuk melihat daftar perintah lengkap."
     )
-    await update.message.reply_text(welcome_message, parse_mode='Markdown')
+    await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
 # --- HANDLER: Feature 2: Proses Otomatis .TGS (Multi-Langkah) ---
 
 async def handle_tgs_file(update: Update, context) -> int:
     """Langkah 1: Menerima file .tgs, mengoptimalkan, dan meminta nama pack."""
     file_id = update.message.document.file_id
-    file_name = update.message.document.file_name
     user_id = update.effective_user.id
     download_path: Optional[str] = None
     
-    await update.message.reply_text("✅ File **.tgs** diterima. Sedang mengunduh dan mengoptimalkan...")
+    await update.message.reply_text("📥 File **.tgs** diterima. Mulai proses *minifikasi*...")
     
     try:
         # 1. Unduh File
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
         new_file = await context.bot.get_file(file_id)
-        safe_name = f"{user_id}_{os.urandom(4).hex()}_{file_name}"
+        safe_name = f"{user_id}_{os.urandom(4).hex()}.tgs"
         download_path = os.path.join(DOWNLOADS_DIR, safe_name)
         await new_file.download_to_drive(download_path)
         
         # 2. Optimasi (Minify)
-        await update.message.reply_text("⏳ Mengoptimalkan ukuran file...")
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
         optimized_path = optimize_tgs_file(download_path) 
         
         # Simpan path file di context.user_data
         context.user_data['tgs_path'] = optimized_path
         
         await update.message.reply_text(
-            "🎉 **Optimasi selesai!** File siap dijadikan emoji pack.\n"
-            "Sekarang, **kirimkan nama unik** untuk paket emoji Anda (contoh: `MyCoolPack`)\n"
-            "*(Hanya huruf dan angka)*",
-            reply_markup=ForceReply(selective=True)
+            "✨ **Optimasi Berhasil!** File siap untuk diunggah.\n"
+            "Sekarang, balas pesan ini dengan **nama unik** untuk paket emoji Anda (contoh: `my_cool_emojis`)\n"
+            "*(Hanya huruf dan angka, tanpa spasi)*",
+            reply_markup=ForceReply(selective=True),
+            parse_mode=ParseMode.MARKDOWN
         )
         
         return GET_PACK_NAME
         
     except Exception as e:
-        await update.message.reply_text(f"❌ Gagal memproses file .tgs. Error: {e}")
+        await update.message.reply_text(f"❌ **Gagal Memproses.** Error Lottie: `{e}`")
         if download_path and os.path.exists(download_path):
             os.remove(download_path)
         return ConversationHandler.END
 
 async def get_pack_name(update: Update, context) -> int:
     """Langkah 2: Menerima nama pack, generate link, kirim file, dan selesai."""
-    user_id = update.effective_user.id
     pack_name = update.message.text.strip()
-    
     original_file_path: Optional[str] = context.user_data.pop('tgs_path', None)
     
-    # Fungsi pembantu untuk membersihkan file
     def cleanup():
         if original_file_path and os.path.exists(original_file_path):
             os.remove(original_file_path)
 
     if not original_file_path or not os.path.exists(original_file_path):
-        await update.message.reply_text("❌ File .tgs sebelumnya hilang atau proses sudah kadaluarsa. Silakan kirim ulang file .tgs Anda.")
+        await update.message.reply_text("❌ Proses kadaluarsa. Silakan kirim ulang file .tgs Anda.")
         return ConversationHandler.END
 
-    # Validasi nama pack
     if not re.fullmatch(r'^[a-zA-Z0-9]+$', pack_name):
         await update.message.reply_text(
-            "⚠️ Nama paket tidak valid. Gunakan hanya huruf dan angka (contoh: `KucingImutPack`)."
+            "⚠️ Nama paket tidak valid. Harap gunakan hanya huruf dan angka (misalnya: `MyPack123`)."
         )
         cleanup()
         return ConversationHandler.END
@@ -129,21 +154,22 @@ async def get_pack_name(update: Update, context) -> int:
     emoji_pack_link = f"t.me/addemoji/{pack_name}"
     
     response_message = (
-        f"**🚀 Paket Emoji Siap!**\n\n"
-        f"Nama Paket Anda: `{pack_name}`\n"
-        f"Link Emoji Pack: {emoji_pack_link}\n\n"
-        f"File **.tgs** yang dioptimalkan dikirim di bawah ini."
+        f"🥳 **Paket Emoji Anda Siap!**\n\n"
+        f"Nama Paket: `{pack_name}`\n"
+        f"Link Tambah Emoji: [KLIK DI SINI]({emoji_pack_link})\n\n"
+        f"File **.tgs** yang sudah dioptimalkan terlampir di bawah ini. Gunakan file ini saat Anda membuka tautan di atas."
     )
     
     try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
         with open(original_file_path, 'rb') as f:
             await update.message.reply_document(
                 document=f, 
                 caption=response_message, 
-                parse_mode='Markdown'
+                parse_mode=ParseMode.MARKDOWN
             )
     except Exception as e:
-        await update.message.reply_text(f"❌ Gagal mengirim file .tgs hasil optimasi: {e}")
+        await update.message.reply_text(f"❌ Gagal mengirim file hasil optimasi: `{e}`")
     finally:
         cleanup()
 
@@ -156,9 +182,8 @@ async def cancel_tgs(update: Update, context) -> int:
         if os.path.exists(file_path):
             os.remove(file_path)
     
-    # Hanya batalkan jika pesan bukan merupakan file .tgs lain
-    if not (update.message.document and update.message.document.mime_type == 'application/x-tgsticker'):
-        await update.message.reply_text("Proses pembuatan paket emoji dibatalkan.")
+    if update.message.document is None or update.message.document.mime_type != 'application/x-tgsticker':
+        await update.message.reply_text("❌ Proses pembuatan paket dibatalkan.")
     return ConversationHandler.END
 
 
@@ -166,11 +191,10 @@ async def cancel_tgs(update: Update, context) -> int:
 async def json2tgs_command(update: Update, context) -> None:
     """Convert file .json menjadi .tgs"""
     message = update.message
-    target_message = message.reply_to_message if message.reply_to_message else message
+    target_message = message.reply_to_message if message.reply_to_message and message.reply_to_message.document else message
     
-    # Cek file .json yang dibalas/dikirim
     if not (target_message.document and target_message.document.mime_type == 'application/json'):
-        await message.reply_text("⚠️ Mohon balas (reply) ke file **.json** atau kirim file .json dengan *caption* `/json2tgs`.")
+        await message.reply_text("⚠️ **Format Salah.** Balas file **.json** dengan perintah `/json2tgs`.")
         return
 
     file_id = target_message.document.file_id
@@ -178,8 +202,9 @@ async def json2tgs_command(update: Update, context) -> None:
     tgs_path: Optional[str] = None
     
     try:
-        await message.reply_text("⏳ File **.json** diterima. Sedang di-convert ke **.tgs**...")
-        
+        await message.reply_text("⏳ File **.json** diterima. Mengkonversi dan mengoptimalkan...")
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
+
         # 1. Unduh File
         new_file = await context.bot.get_file(file_id)
         json_path = os.path.join(DOWNLOADS_DIR, f"temp_{os.urandom(4).hex()}.json")
@@ -190,12 +215,11 @@ async def json2tgs_command(update: Update, context) -> None:
         
         # 3. Kirim Balik
         with open(tgs_path, 'rb') as f:
-             await message.reply_document(document=f, caption="✅ Konversi & Optimasi Selesai!")
+             await message.reply_document(document=f, caption="✅ **Konversi Selesai!** File .tgs terlampir.", parse_mode=ParseMode.MARKDOWN)
         
     except Exception as e:
-        await message.reply_text(f"❌ Gagal convert .json ke .tgs: {e}")
+        await message.reply_text(f"❌ **Gagal Konversi.** Error Lottie: `{e}`")
     finally:
-        # 4. Bersihkan
         if json_path and os.path.exists(json_path):
             os.remove(json_path)
         if tgs_path and os.path.exists(tgs_path):
@@ -208,7 +232,7 @@ async def removebg_command(update: Update, context) -> None:
     target_message = message.reply_to_message if message.reply_to_message else message
     
     if not REMOVE_BG_KEY:
-        await message.reply_text("❌ **API Key Remove.bg** belum dikonfigurasi.")
+        await message.reply_text("❌ **Konfigurasi Kurang.** API Key Remove.bg belum disetel.")
         return
     
     # Cek file: foto atau dokumen (.png/.jpg)
@@ -216,7 +240,7 @@ async def removebg_command(update: Update, context) -> None:
     is_document = target_message.document and target_message.document.mime_type in ['image/png', 'image/jpeg']
 
     if not (is_photo or is_document):
-        await message.reply_text("⚠️ Mohon balas (reply) ke file **gambar (.png/.jpg)**.")
+        await message.reply_text("⚠️ **Format Salah.** Balas file **gambar (.png/.jpg)** dengan perintah `/removebg`.")
         return
         
     file_id = target_message.photo[-1].file_id if is_photo else target_message.document.file_id
@@ -225,8 +249,9 @@ async def removebg_command(update: Update, context) -> None:
     output_path: Optional[str] = None
     
     try:
-        await message.reply_text("⏳ Gambar diterima. Sedang menghapus background...")
-        
+        await message.reply_text("⏳ Gambar diterima. Memproses penghapusan latar belakang...")
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
+
         # 1. Unduh File
         new_file = await context.bot.get_file(file_id)
         input_path = os.path.join(DOWNLOADS_DIR, f"in_{os.urandom(4).hex()}.temp")
@@ -239,10 +264,10 @@ async def removebg_command(update: Update, context) -> None:
         
         # 3. Kirim Balik
         with open(output_path, 'rb') as f:
-             await message.reply_document(document=f, caption="✅ Background Dihapus!")
+             await message.reply_document(document=f, caption="✅ **Background Dihapus!** File PNG transparan terlampir.", parse_mode=ParseMode.MARKDOWN)
         
     except Exception as e:
-        await message.reply_text(f"❌ Gagal remove background. Pastikan API key valid: {e}")
+        await message.reply_text(f"❌ **Gagal Menghapus Background.** Pastikan Anda memiliki kuota API dan file valid: `{e}`")
     finally:
         # 4. Bersihkan
         if input_path and os.path.exists(input_path):
@@ -258,23 +283,16 @@ def main() -> None:
 
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # PERBAIKAN: Mengganti filters.MimeType() dengan filter regex pada nama file
-    
     # Definisikan Filter Kustom
-    # TGS: Cek dokumen yang memiliki ekstensi .tgs
     TGS_FILTER = filters.Document.ALL & filters.Regex(r"\.tgs$")
-    
-    # JSON: Cek dokumen yang memiliki ekstensi .json
     JSON_FILTER = filters.Document.ALL & filters.Regex(r"\.json$")
     
-    # Conversation Handler untuk proses .tgs
+    # Conversation Handler untuk proses .tgs (Feature 2)
     tgs_handler = ConversationHandler(
-        # Menggunakan TGS_FILTER berbasis regex
         entry_points=[MessageHandler(TGS_FILTER, handle_tgs_file)], 
         states={
             GET_PACK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_pack_name)],
         },
-        # Fallbacks: menangkap pesan lain saat dalam conversation, batalkan proses
         fallbacks=[MessageHandler(filters.ALL, cancel_tgs)], 
     )
 
@@ -282,12 +300,11 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(tgs_handler)
     
-    # Handlers untuk /json2tgs (mendukung reply atau caption)
+    # Handlers untuk /json2tgs (Feature 3)
     application.add_handler(CommandHandler("json2tgs", json2tgs_command))
-    # Menggunakan JSON_FILTER berbasis regex
     application.add_handler(MessageHandler(JSON_FILTER & filters.Caption("json2tgs"), json2tgs_command))
 
-    # Handlers untuk /removebg (mendukung reply ke foto atau dokumen, atau caption)
+    # Handlers untuk /removebg (Feature 4)
     application.add_handler(CommandHandler("removebg", removebg_command))
     application.add_handler(MessageHandler((filters.PHOTO | filters.Document.ALL) & (filters.Caption("removebg") | filters.Caption("/removebg")), removebg_command))
     
@@ -297,7 +314,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    main()
+
 
 
 
