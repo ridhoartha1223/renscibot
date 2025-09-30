@@ -4,7 +4,7 @@ import aiohttp
 from telethon import TelegramClient, events
 from telethon.tl.types import InputDocument
 from telethon.tl.functions.stickers import CreateStickerSetRequest, AddStickerToSetRequest
-from telethon.errors import StickerSetInvalidError
+from telethon.errors import rpcerrorlist
 
 # ===== CONFIG =====
 BOT_TOKEN = os.getenv("8319183574:AAHIi3SX218DNqS-owUcQ9Xyvc_D4Mk14Rw")
@@ -101,7 +101,7 @@ async def tgs_handler(event):
                 animated=True
             ))
             await event.reply(f"Emoji pack dibuat!\nLink: t.me/addemoji/{pack_name}")
-        except StickerSetInvalidError:
+        except rpcerrorlist.StickerSetInvalidError:
             # Pack sudah ada -> tambahkan sticker
             await client(AddStickerToSetRequest(
                 stickers=[input_doc],
@@ -111,4 +111,5 @@ async def tgs_handler(event):
 
 client.start()
 client.run_until_disconnected()
+
 
