@@ -1,76 +1,63 @@
-import asyncio
 import json
+import os
 from telethon import TelegramClient, events
-from telethon.tl.types import InputStickerSetShortName
-from telethon.tl.functions.messages import ImportStickerSetRequest, GetStickerSetRequest
-from telethon.tl.functions.stickers import AddStickerToSetRequest
-from telethon.tl.functions.messages import SendMediaRequest
-from telethon.tl.types import InputDocument, InputStickerSetItem
+from telethon.tl.functions.stickers import CreateStickerSetRequest, AddStickerToSetRequest
+from telethon.tl.types import InputStickerSetShortName, InputDocument
 
-# -------------------- CONFIG --------------------
-BOT_TOKEN = "8319183574:AAHIi3SX218DNqS-owUcQ9Xyvc_D4Mk14Rw"
-API_ID = 28235685  # Masukkan api_id dari https://my.telegram.org
-API_HASH = "03c741f65092cb2ccdd9341b9b055f13"  # Masukkan api_hash
+# ------------------- CONFIG -------------------
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # atau langsung string "xxx:yyy"
+SERVICE_ACCOUNT_FILE = "service_account.json"  # file .json di project
+DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")  # ID folder Google Drive
 
-# Path ke file service account JSON
-SERVICE_ACCOUNT_FILE = "service_account.json"
+# Telethon client requires api_id and api_hash
+api_id = int(os.environ.get("API_ID", "28235685"))
+api_hash = os.environ.get("API_HASH", "03c741f65092cb2ccdd9341b9b055f13")
 
-# Folder ID Google Drive (kalau mau pakai integrasi Drive)
-DRIVE_FOLDER_ID = "1Z5q0Td8zWD4cFPO0upmWhBHAXW3eSacm"
-# ------------------------------------------------
+client = TelegramClient('bot', api_id, api_hash).start(bot_token=BOT_TOKEN)
 
-# Load Service Account JSON (opsional, kalau pakai Google Drive)
-with open(SERVICE_ACCOUNT_FILE, "r") as f:
-    service_account_info = json.load(f)
-
-client = TelegramClient('sticker_bot', API_ID, API_HASH)
-
-# -------------------- EVENT HANDLERS --------------------
-
-@client.on(events.NewMessage(pattern='/start'))
+# ------------------- EVENTS -------------------
+@client.on(events.NewMessage(pattern="/start"))
 async def start_handler(event):
-    await event.reply("Halo! Bot Stiker aktif. Gunakan /help untuk melihat command.")
+    await event.respond("Bot aktif! Kirim sticker untuk ditambahkan ke set.")
+    raise events.StopPropagation
 
-@client.on(events.NewMessage(pattern='/help'))
-async def help_handler(event):
-    text = (
-        "Daftar command:\n"
-        "/start - Mulai bot\n"
-        "/help - Bantuan\n"
-        "/addsticker - Tambah stiker ke pack\n"
-        "/liststickers - List stiker di pack\n"
-        "/createstickerpack - Buat stiker pack baru\n"
-    )
-    await event.reply(text)
+@client.on(events.NewMessage)
+async def sticker_handler(event):
+    if event.sticker:
+        sticker_set_name = "my_awesome_sticker_set_by_bot"  # nama short_name
+        sticker_set_title = "My Sticker Set"  # judul set
 
-# Event buat nambah stiker ke pack
-@client.on(events.NewMessage(pattern='/addsticker'))
-async def add_sticker(event):
-    # Cek apakah ada reply ke gambar
-    if event.reply_to_msg_id:
-        reply_msg = await event.get_reply_message()
-        if reply_msg.media:
-            await event.reply("Stiker berhasil ditambahkan (dummy).")
-            # Di sini nanti logic konversi gambar -> .WEBP -> add ke sticker pack
+        # Cek apakah sticker set sudah ada
+        try:
+            await client(GetStickerSetRequest(
+                stickerset=InputStickerSetShortName(sticker_set_name),
+                hash=0
+            ))
+            sticker_set_exists = True
+        except:
+            sticker_set_exists = False
+
+        # Tambah sticker ke set
+        if not sticker_set_exists:
+            await client(CreateStickerSetRequest(
+                user_id=await event.client.get_me(),
+                title=sticker_set_title,
+                short_name=sticker_set_name,
+                stickers=[InputDocument(id=event.sticker.document.id,
+                                        access_hash=event.sticker.document.access_hash,
+                                        file_reference=event.sticker.document.file_reference)],
+                animated=False
+            ))
+            await event.respond(f"Sticker set baru dibuat: {sticker_set_title}")
         else:
-            await event.reply("Reply ke gambar/gif yang mau dijadikan stiker!")
-    else:
-        await event.reply("Gunakan command ini dengan reply ke gambar.")
+            await client(AddStickerToSetRequest(
+                stickerset=InputStickerSetShortName(sticker_set_name),
+                sticker=InputDocument(id=event.sticker.document.id,
+                                      access_hash=event.sticker.document.access_hash,
+                                      file_reference=event.sticker.document.file_reference)
+            ))
+            await event.respond(f"Sticker ditambahkan ke set: {sticker_set_title}")
 
-# Event buat list sticker
-@client.on(events.NewMessage(pattern='/liststickers'))
-async def list_stickers(event):
-    await event.reply("Daftar stiker pack (dummy): 🟢 Stiker 1, 🔵 Stiker 2")
-
-# Event buat create sticker pack baru
-@client.on(events.NewMessage(pattern='/createstickerpack'))
-async def create_pack(event):
-    await event.reply("Sticker pack baru berhasil dibuat! (dummy)")
-
-# -------------------- RUN BOT --------------------
-async def main():
-    print("Bot Stiker Telegram siap!")
-    await client.start(bot_token=BOT_TOKEN)
-    await client.run_until_disconnected()  # <- terus listen semua command
-
-asyncio.run(main())
+# ------------------- RUN BOT -------------------
+print("Bot berjalan...")
+client.run_until_disconnected()
