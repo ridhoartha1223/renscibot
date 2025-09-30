@@ -1,4 +1,4 @@
-pyrogram==2.0.45
+pyrogram==2.0.39
 tgcrypto==1.2.2
 lottie==0.10.0
 removebg==0.0.4
