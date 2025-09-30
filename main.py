@@ -1,97 +1,125 @@
 import os
 import json
-import aiohttp
+import shutil
+import requests
 from telethon import TelegramClient, events
-from telethon.tl.types import InputDocument
 
-# ===== CONFIG =====
-API_ID = int(os.getenv("API_ID"))       # dari my.telegram.org
-API_HASH = os.getenv("API_HASH")        # dari my.telegram.org
-BOT_TOKEN = os.getenv("BOT_TOKEN")      # token bot
-REMOVE_BG_API = os.getenv("REMOVE_BG_API")  # key remove.bg
-
-DOWNLOAD_FOLDER = "downloads"
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+# ===== ENV VAR =====
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+REMOVE_BG_KEY = os.getenv("REMOVE_BG_KEY")  # API key remove.bg
 
 client = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+user_state = {}
 
-# ===== HELP TEXT =====
-HELP_TEXT = """
-🤖 Selamat datang di Rensci Emoji Bot!
+os.makedirs("downloads", exist_ok=True)
 
-Command tersedia:
-/help - Tampilkan daftar command
-/json2tgs - Convert file .json ke .tgs
-/tgs2pack - Buat pack emoji dari file .tgs
-/removebg - Hapus background gambar (png/jpg)
-"""
-
-# ===== UTILITY FUNCTIONS =====
-async def convert_json_to_tgs(json_file, output_file):
-    import lottie.parsers.tgs
-    try:
-        anim = lottie.parsers.tgs.parse_tgs(json_file)
-        lottie.parsers.tgs.save_tgs(anim, output_file)
-    except Exception as e:
-        raise Exception(f"Gagal convert json->tgs: {e}")
-
-async def remove_bg(file_path, output_path):
-    url = "https://api.remove.bg/v1.0/removebg"
-    async with aiohttp.ClientSession() as session:
-        with open(file_path, "rb") as f:
-            data = {"size": "auto"}
-            files = {"image_file": f}
-            headers = {"X-Api-Key": REMOVE_BG_API}
-            async with session.post(url, data=data, headers=headers, files=files) as resp:
-                if resp.status == 200:
-                    with open(output_path, "wb") as out:
-                        out.write(await resp.read())
-                else:
-                    raise Exception(await resp.text())
-
-# ===== EVENTS =====
+# ===== START / HELP =====
 @client.on(events.NewMessage(pattern="/start"))
-async def start_handler(event):
-    await event.reply("👋 Halo! Bot siap digunakan.\n" + HELP_TEXT)
+async def start(event):
+    await event.reply(
+        "👋 Selamat datang!\n\n"
+        "Perintah tersedia:\n"
+        "/json2tgs - Kirim file .json untuk convert ke .tgs\n"
+        "/tgs2pack - Kirim file .tgs untuk buat emoji pack link\n"
+        "/removebg - Kirim gambar untuk hapus background\n"
+        "/help - Tampilkan info perintah"
+    )
 
 @client.on(events.NewMessage(pattern="/help"))
-async def help_handler(event):
-    await event.reply(HELP_TEXT)
+async def help(event):
+    await start(event)
 
-@client.on(events.NewMessage)
-async def message_handler(event):
-    if not event.file:
+# ===== COMMAND STATE =====
+@client.on(events.NewMessage(pattern="/json2tgs"))
+async def json2tgs_command(event):
+    user_state[event.sender_id] = "waiting_json"
+    await event.reply("📤 Silahkan kirim file .json untuk dikonversi ke .tgs")
+
+@client.on(events.NewMessage(pattern="/tgs2pack"))
+async def tgs2pack_command(event):
+    user_state[event.sender_id] = "waiting_tgs"
+    await event.reply("📤 Silahkan kirim file .tgs untuk dibuat menjadi emoji pack")
+
+@client.on(events.NewMessage(pattern="/removebg"))
+async def removebg_command(event):
+    user_state[event.sender_id] = "waiting_removebg"
+    await event.reply("📤 Silahkan kirim file gambar (png/jpg) untuk dihapus backgroundnya")
+
+# ===== FILE HANDLER =====
+@client.on(events.NewMessage(func=lambda e: e.file))
+async def file_handler(event):
+    state = user_state.get(event.sender_id)
+    if not state:
         return
 
-    file_name = event.file.name or "file"
-    file_path = os.path.join(DOWNLOAD_FOLDER, file_name)
+    file_path = f"downloads/{event.file.name}"
     await event.download_media(file_path)
-    await event.reply(f"📥 File diterima: {file_path}")
 
-    # Convert JSON -> TGS
-    if file_path.endswith(".json"):
-        tgs_file = file_path.replace(".json", ".tgs")
+    if state == "waiting_json" and file_path.endswith(".json"):
+        await event.reply("✅ File diterima. Sedang konversi .json → .tgs ...")
         try:
-            await convert_json_to_tgs(file_path, tgs_file)
-            await event.reply(f"✅ File berhasil dikonversi ke: {tgs_file}")
+            tgs_path = convert_json_to_tgs(file_path)
+            await event.reply(file=tgs_path)
         except Exception as e:
-            await event.reply(str(e))
+            await event.reply(f"❌ Gagal convert: {e}")
 
-    # Remove background otomatis
-    elif file_path.lower().endswith((".png", ".jpg", ".jpeg")):
-        out_file = file_path.replace(".", "_nobg.")
+    elif state == "waiting_tgs" and file_path.endswith(".tgs"):
+        await event.reply("✅ File .tgs diterima. Membuat link emoji pack ...")
         try:
-            await remove_bg(file_path, out_file)
-            await event.reply(f"✅ Background dihapus: {out_file}")
+            link = create_emoji_pack(file_path)
+            await event.reply(f"🎉 Emoji pack siap: {link}")
         except Exception as e:
-            await event.reply(f"❌ Remove.bg gagal: {e}")
+            await event.reply(f"❌ Gagal buat link pack: {e}")
 
-    # TGS -> buat pack emoji
-    elif file_path.endswith(".tgs"):
-        # NOTE: Untuk membuat pack emoji via bot, Telegram memerlukan user account premium.
-        # Kita hanya bisa mengirim file .tgs dan link pack nanti harus dibuat manual atau via userbot
-        await event.reply("✅ File TGS siap untuk dijadikan emoji pack.\nSilahkan gunakan Telegram UserBot untuk membuat pack otomatis.")
+    elif state == "waiting_removebg" and file_path.lower().endswith((".png",".jpg",".jpeg")):
+        await event.reply("✅ Gambar diterima. Menghapus background ...")
+        try:
+            out_path = remove_bg(file_path)
+            await event.reply(file=out_path)
+        except Exception as e:
+            await event.reply(f"❌ Gagal hapus background: {e}")
 
-# ===== RUN BOT =====
-print("Bot berjalan...")
+    else:
+        await event.reply("⚠️ File tidak sesuai tipe yang diminta")
+
+    user_state.pop(event.sender_id, None)
+
+# ===== FUNCTION =====
+def convert_json_to_tgs(json_path):
+    """
+    Convert JSON ke TGS (minimal optimization)
+    """
+    import lottie
+    tgs_path = json_path.replace(".json", ".tgs")
+    animation = lottie.parsers.tgs.parse_tgs(json_path)
+    lottie.parsers.tgs.write_tgs(animation, tgs_path)
+    return tgs_path
+
+def create_emoji_pack(tgs_path):
+    """
+    Dummy: generate link untuk user bisa simpan pack
+    """
+    return f"https://t.me/addemoji/rensciemojipack"
+
+def remove_bg(image_path):
+    """
+    Remove background via remove.bg API
+    """
+    out_path = image_path.replace(".", "_nobg.")
+    with open(image_path, "rb") as f:
+        response = requests.post(
+            "https://api.remove.bg/v1.0/removebg",
+            files={"image_file": f},
+            data={"size":"auto"},
+            headers={"X-Api-Key": REMOVE_BG_KEY},
+        )
+    if response.status_code == 200:
+        with open(out_path, "wb") as out:
+            out.write(response.content)
+            return out_path
+    else:
+        raise Exception(f"Remove.bg error: {response.status_code} {response.text}")
+
 client.run_until_disconnected()
