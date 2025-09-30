@@ -1,57 +1,45 @@
 import os
 import json
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
-# ================= CONFIG ===================
-BOT_TOKEN = "8319183574:AAHIi3SX218DNqS-owUcQ9Xyvc_D4Mk14Rw"
-DRIVE_FOLDER_ID = "1Z5q0Td8zWD4cFPO0upmWhBHAXW3eSacm"
+# Ambil ENV VAR
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+SERVICE_ACCOUNT_JSON = os.environ.get("SERVICE_ACCOUNT_JSON")
+DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
 
-SERVICE_ACCOUNT_JSON = {
-  "type": "service_account",
-  "project_id": "rensci-bot",
-  "private_key_id": "2c25071c5e8cb9f4ae43323ce7503012dd0af815",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANB ... \n-----END PRIVATE KEY-----\n",
-  "client_email": "rensci@rensci-bot.iam.gserviceaccount.com",
-  "client_id": "104566396256112841524",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/rensci%40rensci-bot.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-}
-# ============================================
+# Load service account JSON
+credentials = service_account.Credentials.from_service_account_info(json.loads(SERVICE_ACCOUNT_JSON))
+drive_service = build('drive', 'v3', credentials=credentials)
 
-# Setup Google Drive
-credentials = service_account.Credentials.from_service_account_info(SERVICE_ACCOUNT_JSON)
-service = build('drive', 'v3', credentials=credentials)
-
-# Bot Handlers
-async def start(update: Update, context):
-    await update.message.reply_text("Halo! Kirimkan file .tgs, nanti akan otomatis di-upload ke Drive.")
-
-async def handle_file(update: Update, context):
-    file = await update.message.document.get_file()
-    path = f"{update.message.document.file_name}"
-    await file.download_to_drive(path)
-
-    # Upload ke Google Drive
-    media = MediaFileUpload(path, mimetype='application/octet-stream')
-    file_drive = service.files().create(
-        body={'name': path, 'parents':[DRIVE_FOLDER_ID]},
-        media_body=media,
-        fields='id'
-    ).execute()
-    
-    await update.message.reply_text(f"File berhasil di-upload! File ID: {file_drive.get('id')}")
-
-# Setup Telegram Bot
+# Telegram bot
 app = ApplicationBuilder().token(BOT_TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+bot = Bot(BOT_TOKEN)
 
-print("Bot sudah berjalan...")
-app.run_polling()
+# Command /start
+async def start(update: Update, context):
+    await update.message.reply_text("Halo! Kirim .tgs file kamu, nanti aku simpan ke Google Drive dan ubah jadi emoji pack!")
+
+# Handler file .tgs
+async def handle_tgs(update: Update, context):
+    file = await update.message.effective_attachment.get_file()
+    file_path = file.file_path
+    await update.message.reply_text(f"File diterima: {file_path}\nProses simpan ke Drive...")
+
+    # Upload ke Drive
+    file_name = update.message.effective_attachment.file_name
+    media = drive_service.files().create(
+        body={"name": file_name, "parents":[DRIVE_FOLDER_ID]},
+        media_body=file_path
+    ).execute()
+    await update.message.reply_text(f"Berhasil diupload ke Drive! ID: {media['id']}")
+
+# Registrasi handler
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.Document.FileExtension("tgs"), handle_tgs))
+
+if name == "__main__":
+    print("Bot siap jalan...")
+    app.run_polling()
