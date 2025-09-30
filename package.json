@@ -1,0 +1,11 @@
+{
+  "name": "lottie-tools-installer",
+  "version": "1.0.0",
+  "description": "Install Lottie minifier tool for Python bot",
+  "dependencies": {
+    "lottie-min": "^1.1.0"
+  },
+  "scripts": {
+    "postinstall": "npm install lottie-min -g"
+  }
+}
