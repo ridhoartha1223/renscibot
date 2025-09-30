@@ -1,45 +1,57 @@
 import os
 import json
+from telethon import TelegramClient, events
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+from googleapiclient.http import MediaFileUpload
 
-# Ambil ENV VAR
+# ===== Ambil ENV vars =====
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-SERVICE_ACCOUNT_JSON = os.environ.get("SERVICE_ACCOUNT_JSON")
 DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
+SERVICE_ACCOUNT_JSON = os.environ.get("SERVICE_ACCOUNT_JSON")
 
-# Load service account JSON
-credentials = service_account.Credentials.from_service_account_info(json.loads(SERVICE_ACCOUNT_JSON))
+if not all([BOT_TOKEN, DRIVE_FOLDER_ID, SERVICE_ACCOUNT_JSON]):
+    raise ValueError("Pastikan BOT_TOKEN, DRIVE_FOLDER_ID, dan SERVICE_ACCOUNT_JSON sudah di-set di ENV vars.")
+
+# ===== Setup Google Drive API =====
+service_account_info = json.loads(SERVICE_ACCOUNT_JSON)
+credentials = service_account.Credentials.from_service_account_info(service_account_info)
 drive_service = build('drive', 'v3', credentials=credentials)
 
-# Telegram bot
-app = ApplicationBuilder().token(BOT_TOKEN).build()
-bot = Bot(BOT_TOKEN)
+# ===== Setup Telegram Bot =====
+bot = TelegramClient('bot_session', api_id=123456, api_hash='dummyhash').start(bot_token=BOT_TOKEN)
 
-# Command /start
-async def start(update: Update, context):
-    await update.message.reply_text("Halo! Kirim .tgs file kamu, nanti aku simpan ke Google Drive dan ubah jadi emoji pack!")
-
-# Handler file .tgs
-async def handle_tgs(update: Update, context):
-    file = await update.message.effective_attachment.get_file()
-    file_path = file.file_path
-    await update.message.reply_text(f"File diterima: {file_path}\nProses simpan ke Drive...")
-
-    # Upload ke Drive
-    file_name = update.message.effective_attachment.file_name
-    media = drive_service.files().create(
-        body={"name": file_name, "parents":[DRIVE_FOLDER_ID]},
-        media_body=file_path
+@bot.on(events.NewMessage(pattern='/list'))
+async def list_files(event):
+    """List file names di folder Google Drive"""
+    results = drive_service.files().list(
+        q=f"'{DRIVE_FOLDER_ID}' in parents and trashed=false",
+        pageSize=10,
+        fields="files(id, name)"
     ).execute()
-    await update.message.reply_text(f"Berhasil diupload ke Drive! ID: {media['id']}")
+    items = results.get('files', [])
+    if not items:
+        await event.reply("Folder kosong.")
+    else:
+        msg = "\n".join([f"{item['name']} (ID: {item['id']})" for item in items])
+        await event.reply(msg)
 
-# Registrasi handler
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.Document.FileExtension("tgs"), handle_tgs))
+@bot.on(events.NewMessage(pattern='/upload'))
+async def upload_file(event):
+    """Upload file dari reply ke Google Drive"""
+    if not event.message.reply_to_msg_id:
+        await event.reply("Reply ke file yang mau di-upload.")
+        return
+    reply = await event.get_reply_message()
+    if not reply.document:
+        await event.reply("Reply ke file yang valid.")
+        return
 
-if name == "__main__":
-    print("Bot siap jalan...")
-    app.run_polling()
+    path = await reply.download_media()
+    file_metadata = {'name': os.path.basename(path), 'parents': [DRIVE_FOLDER_ID]}
+    media = MediaFileUpload(path, resumable=True)
+    drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    await event.reply(f"File {os.path.basename(path)} berhasil di-upload!")
+
+print("Bot sudah siap...")
+bot.run_until_disconnected()
