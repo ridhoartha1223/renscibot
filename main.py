@@ -191,8 +191,7 @@ async def json2tgs_command(update: Update, context) -> None:
     """Convert file .json menjadi .tgs"""
     message = update.message
     # Periksa pesan balasan atau pesan itu sendiri
-    target_message = message.
-    reply_to_message if message.reply_to_message and message.reply_to_message.document else message
+    target_message = message.reply_to_message if message.reply_to_message and message.reply_to_message.document else message
     
     if not (target_message.document and target_message.document.mime_type == 'application/json'):
         await message.reply_text("⚠️ Format Salah. Balas file .json dengan perintah /json2tgs.")
@@ -315,3 +314,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
