@@ -1,11 +1,4 @@
 python-telegram-bot==20.8
 requests
 Pillow
-python-removebg
-# Untuk Lottie/TGS, kita perlu solusi yang bisa diinstal via pip. 
-# Saya asumsikan Anda akan menggunakan tool eksternal (misalnya lottie-rs/lottie-min) 
-# yang Anda panggil dari Python, atau menggunakan library seperti 'pylottie'.
-# Karena implementasi spesifik Lottie bisa kompleks, saya hanya akan menyertakan 
-# library standar dan menandai bagian integrasi Lottie di main.py.
-# Jika Anda menggunakan solusi eksternal, Anda perlu memastikan tool tersebut 
-# terinstal di lingkungan Railway (misalnya via build script).
+removebg
