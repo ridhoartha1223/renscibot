@@ -1,7 +1,7 @@
-telethon==1.29.3
+telethon
 aiohttp
 lottie
-google-api-python-client==2.86.0
-google-auth==2.21.0
+removebg
+
 
 
