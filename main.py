@@ -192,8 +192,7 @@ async def on_any_message(event):
 
     # Send back the .tgs file so user can download/use
     try:
-        await event.
-        reply(file=str(local_path))
+        await event.reply(file=str(local_path))
     except Exception:
         # fallback: send the original document if possible
         try:
@@ -216,3 +215,4 @@ if name == "__main__":
     print("Client started. Bot siap menerima perintah.")
     client.run_until_disconnected()
         
+
