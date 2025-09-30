@@ -1,5 +1,0 @@
-pyrogram==1.2.9
-tgcrypto
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib

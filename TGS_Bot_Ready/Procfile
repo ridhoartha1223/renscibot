@@ -1,1 +1,0 @@
-worker: python tgs_bot_heroku.py
