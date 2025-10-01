@@ -112,8 +112,7 @@ async def handle_text(client, message: Message):
     if step == "input_pack_name":
         state["pack_name"] = message.text
         state["step"] = "input_emoji"
-        await message.
-      reply_text("Masukkan replacement emoji untuk pack ini (misal: 😎):")
+        await message.reply_text("Masukkan replacement emoji untuk pack ini (misal: 😎):")
     elif step == "input_emoji":
         state["emoji"] = message.text
         state["step"] = "input_link"
@@ -160,3 +159,4 @@ async def main():
 
 if name == "__main__":
     asyncio.run(main())
+
