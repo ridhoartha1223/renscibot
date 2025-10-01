@@ -120,8 +120,13 @@ async def import_tgs_handler(client, message: Message):
 
     
     if __name__ == "__main__":
-        print("🚀 Bot is starting...")
+       print("🚀 Bot is starting...")
+
+@app.on_message(filters.private)
+async def debug_test(client, message):
+    await message.reply_text("✅ Bot connected and working!")
         app.run()
+
 
 
 
