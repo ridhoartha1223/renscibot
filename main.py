@@ -157,6 +157,7 @@ async def main():
     await idle()
     await bot.stop()
 
-if name == "__main__":
+if __name__ == "__main__":
     asyncio.run(main())
+
 
