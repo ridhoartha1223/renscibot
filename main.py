@@ -2,7 +2,7 @@ import os
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 import lottie
-from lottie.exporters.tgs import export_tgs
+from lottie.exporters import exporters
 
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
@@ -14,10 +14,10 @@ app = Client(":memory:", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user_state = {}  # {user_id: action}
 
 
-# Helper: JSON to TGS
+# Helper: JSON to TGS (compatible lottie terbaru)
 def convert_json_to_tgs(input_path, output_path, optimize=False):
-    animation = lottie.parsers.tgs.parse_tgs(input_path)  # pakai file path langsung
-    export_tgs(animation, output_path, minify=optimize)   # versi terbaru
+    animation = lottie.parsers.tgs.parse_tgs(input_path)  # parse dari path
+    exporters.TgsExporter(animation).export(output_path, minify=optimize)  # versi terbaru
 
 
 # /start → menu interaktif
@@ -87,7 +87,7 @@ async def debug_ping(client, message):
     await message.reply("✅ Bot connected and working!")
 
 
-if name == "__main__":
+if __name__ == "__main__":
     print("🚀 Bot is starting...")
     app.start()
     print("🚀 Bot is running...")
