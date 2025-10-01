@@ -1,7 +1,7 @@
 import os
 import json
 from pyrogram import Client, filters, idle
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 import lottie
 from lottie.exporters import exporters
 
@@ -9,13 +9,11 @@ API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Session in-memory → aman di Railway
-app = Client(
-    ":memory:",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+app = Client(":memory:", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+# Simpan state user sementara
+user_state = {}  # {user_id: action}
+
 
 # Helper: JSON to TGS
 def convert_json_to_tgs(input_path, output_path, optimize=False):
@@ -25,96 +23,81 @@ def convert_json_to_tgs(input_path, output_path, optimize=False):
     exporters.export_tgs(animation, output_path, minify=optimize)
 
 
-# Command: /json2tgs
-@app.on_message(filters.command("json2tgs") & filters.private)
-async def json2tgs_handler(client, message: Message):
-    if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.reply("❌ Reply ke file .json untuk convert ke `.tgs`")
+# /start → menu interaktif
+@app.on_message(filters.command("start"))
+async def start(client, message):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("JSON → TGS", callback_data="json2tgs")],
+        [InlineKeyboardButton("JSON → TGS (Optimize)", callback_data="json2tgs_opt")],
+        [InlineKeyboardButton("Import TGS", callback_data="import_tgs")]
+    ])
+    await message.reply("Selamat datang! Pilih fitur:", reply_markup=keyboard)
 
-    file = await message.reply_to_message.download()
-    output = file.replace(".json", ".tgs")
+
+# Callback query → set user state
+@app.on_callback_query()
+async def callback_handler(client, query):
+    action = query.data
+    user_state[query.from_user.id] = action  # simpan state
+
+    if action == "json2tgs":
+        await query.message.reply("Silakan kirim file .json yang ingin di-convert ke `.tgs`")
+    elif action == "json2tgs_opt":
+        await query.message.reply("Silakan kirim file .json yang ingin di-convert ke .tgs (optimized)")
+    elif action == "import_tgs":
+        await query.message.reply("Silakan kirim file .tgs yang ingin di-import ke emoji premium (simulasi)")
+
+
+# Handler document → cek state user
+@app.on_message(filters.document)
+async def document_handler(client, message: Message):
+    action = user_state.get(message.from_user.id)
+    if not action:
+        return  # user belum pilih fitur
+
+    file_path = await message.download()
+    output = None
 
     try:
-        convert_json_to_tgs(file, output, optimize=False)
-        size = os.path.getsize(output)
+        if action == "json2tgs":
+            output = file_path.replace(".json", ".tgs")
+            convert_json_to_tgs(file_path, output, optimize=False)
+        elif action == "json2tgs_opt":
+            output = file_path.replace(".json", "_opt.tgs")
+            convert_json_to_tgs(file_path, output, optimize=True)
+        elif action == "import_tgs":
+            size = os.path.getsize(file_path)
+            if size > 64 * 1024:
+                await message.reply("⚠️ File lebih dari 64KB! Tidak bisa dijadikan emoji.")
+                return
+            # Simulasi import
+            await message.reply("✅ File siap diimpor! (simulasi emoji premium)")
 
-        if size > 64 * 1024:
-            await message.reply("⚠️ Hasil file lebih dari 64KB! Tidak bisa dijadikan emoji.")
-        else:
-            await message.reply_document(output, caption="✅ Berhasil convert!\nMau impor ke emoji premium? Gunakan /import_tgs")
+        if output:
+            size = os.path.getsize(output)
+            if size > 64 * 1024:
+                await message.reply("⚠️ Hasil file lebih dari 64KB! Tidak bisa dijadikan emoji.")
+            else:
+                await message.reply_document(output, caption="✅ Berhasil convert!")
+
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
+
     finally:
-        if os.path.exists(file):
-            os.remove(file)
-        if os.path.exists(output):
+        # Hapus file sementara
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        if output and os.path.exists(output):
             os.remove(output)
 
-
-# Command: /json2tgs_optimilize
-@app.on_message(filters.command("json2tgs_optimilize") & filters.private)
-async def json2tgs_opt_handler(client, message: Message):
-    if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.reply("❌ Reply ke file .json untuk convert ke .tgs (optimized)")
-
-    file = await message.reply_to_message.download()
-    output = file.replace(".json", "_opt.tgs")
-
-    try:
-        convert_json_to_tgs(file, output, optimize=True)
-        size = os.path.getsize(output)
-
-        if size > 64 * 1024:
-            await message.reply("⚠️ Hasil file lebih dari 64KB! Tidak bisa dijadikan emoji.")
-        else:
-            await message.reply_document(output, caption="✅ Berhasil convert (optimized)!\nMau impor ke emoji premium? Gunakan /import_tgs")
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
-    finally:
-        if os.path.exists(file):
-            os.remove(file)
-        if os.path.exists(output):
-            os.remove(output)
+        # Reset state user
+        user_state.pop(message.from_user.id, None)
 
 
-# Command: /import_tgs
-@app.on_message(filters.command("import_tgs") & filters.private)
-async def import_tgs_handler(client, message: Message):
-    if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.reply("❌ Reply ke file .tgs untuk impor ke emoji premium")
-
-    file = await message.reply_to_message.download()
-    size = os.path.getsize(file)
-
-    if size > 64 * 1024:
-        await message.reply("⚠️ File lebih dari 64KB! Tidak bisa dijadikan emoji.")
-        os.remove(file)
-        return
-
-    await message.reply(
-        "📝 Masukkan nama pack emoji premium yang diinginkan.\n\nFormat:\n`nama_pack | emoji_replacement | custom_link`\n\nContoh:\n`RensiPack | 😎 | rensipackemoji`"
-    )
-
-    response: Message = await client.listen(message.chat.id)
-
-    try:
-        nama_pack, emoji_replacement, custom_link = map(str.strip, response.text.split("|"))
-
-        await message.reply(
-            f"✅ Emoji siap diimpor!\n\nNama Pack: {nama_pack}\nEmoji: {emoji_replacement}\nCustom Link: https://t.me/addemoji/{custom_link}"
-        )
-
-    except Exception as e:
-        await message.reply(f"❌ Format salah. Error: {e}")
-
-    os.remove(file)
-
-
-# Debug test untuk memastikan bot connect
-@app.on_message(filters.private)
-async def debug_test(client, message):
-    if message.text == "/ping":
-        await message.reply_text("✅ Bot connected and working!")
+# Debug ping
+@app.on_message(filters.private & filters.command("ping"))
+async def debug_ping(client, message):
+    await message.reply("✅ Bot connected and working!")
 
 
 if __name__ == "__main__":
@@ -123,9 +106,3 @@ if __name__ == "__main__":
     print("🚀 Bot is running...")
     idle()  # tunggu update Telegram
     app.stop()
-
-
-
-
-
-
