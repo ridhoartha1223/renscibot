@@ -1,16 +1,15 @@
 import os
 import json
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import Message
 import lottie
 from lottie.exporters import exporters
-
 
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Pakai session in-memory (tidak pakai SQLite file)
+# Session in-memory → aman di Railway
 app = Client(
     ":memory:",
     api_id=API_ID,
@@ -18,18 +17,12 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-
 # Helper: JSON to TGS
 def convert_json_to_tgs(input_path, output_path, optimize=False):
     with open(input_path, "r", encoding="utf-8") as f:
         json_data = json.load(f)
-
     animation = lottie.parsers.tgs.parse_tgs(json_data)
-
-    if optimize:
-        exporters.export_tgs(animation, output_path, minify=True)
-    else:
-        exporters.export_tgs(animation, output_path)
+    exporters.export_tgs(animation, output_path, minify=optimize)
 
 
 # Command: /json2tgs
@@ -62,7 +55,7 @@ async def json2tgs_handler(client, message: Message):
 @app.on_message(filters.command("json2tgs_optimilize") & filters.private)
 async def json2tgs_opt_handler(client, message: Message):
     if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.reply("❌ Reply ke file .json untuk convert ke .tgs (optimize)")
+        return await message.reply("❌ Reply ke file .json untuk convert ke .tgs (optimized)")
 
     file = await message.reply_to_message.download()
     output = file.replace(".json", "_opt.tgs")
@@ -98,7 +91,6 @@ async def import_tgs_handler(client, message: Message):
         os.remove(file)
         return
 
-    # Tanya detail pack
     await message.reply(
         "📝 Masukkan nama pack emoji premium yang diinginkan.\n\nFormat:\n`nama_pack | emoji_replacement | custom_link`\n\nContoh:\n`RensiPack | 😎 | rensipackemoji`"
     )
@@ -108,7 +100,6 @@ async def import_tgs_handler(client, message: Message):
     try:
         nama_pack, emoji_replacement, custom_link = map(str.strip, response.text.split("|"))
 
-        # Simulasi hasil import
         await message.reply(
             f"✅ Emoji siap diimpor!\n\nNama Pack: {nama_pack}\nEmoji: {emoji_replacement}\nCustom Link: https://t.me/addemoji/{custom_link}"
         )
@@ -118,15 +109,20 @@ async def import_tgs_handler(client, message: Message):
 
     os.remove(file)
 
-    
-  from pyrogram import idle
+
+# Debug test untuk memastikan bot connect
+@app.on_message(filters.private)
+async def debug_test(client, message):
+    if message.text == "/ping":
+        await message.reply_text("✅ Bot connected and working!")
+
 
 if name == "__main__":
+    print("🚀 Bot is starting...")
     app.start()
     print("🚀 Bot is running...")
-    idle()  # tunggu update dari Telegram
+    idle()  # tunggu update Telegram
     app.stop()
-
 
 
 
