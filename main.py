@@ -115,6 +115,7 @@ async def import_tgs_handler(client, message: Message):
     os.remove(file)
 
 
-if name == "__main__":
+if __name__ == "__main__":
     app.run()
+
 
