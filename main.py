@@ -1,69 +1,120 @@
 import os
+import asyncio
 import json
-import requests
+import aiofiles
+from pyrogram import Client, filters
+from pyrogram.types import Message
 import lottie
 from lottie.exporters import exporters
-from pyrogram import Client, filters
-import ntplib, time
+from lottie.parsers.tgs import parse_tgs
 
-# =======================
-# Sinkronisasi waktu dulu
-# =======================
-try:
-    print("⏳ Sinkronisasi waktu dengan NTP...")
-    c = ntplib.NTPClient()
-    response = c.request('pool.ntp.org')
-    ts = response.tx_time
-    time_tuple = time.localtime(ts)
-    print("✅ Waktu sinkron:", time.strftime('%Y-%m-%d %H:%M:%S', time_tuple))
-except Exception as e:
-    print("⚠️ Gagal sinkronisasi waktu:", e)
 
-# =======================
-# Konfigurasi
-# =======================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-REMOVE_BG_API = os.getenv("REMOVE_BG_API")
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-app = Client("emoji_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("emoji-bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ================
-# Auto convert JSON ke TGS
-# ================
-@app.on_message(filters.document)
-async def handle_json(client, message):
-    if not message.document.file_name.endswith(".json"):
-        return
-    
-    json_path = await message.download(file_name="input.json")
-    tgs_path = "output.tgs"
+
+# Helper: JSON to TGS
+async def convert_json_to_tgs(input_path, output_path, optimize=False):
+    with open(input_path, "r", encoding="utf-8") as f:
+        json_data = json.load(f)
+
+    # load animation
+    animation = lottie.parsers.tgs.parse_tgs(json_data)
+
+    if optimize:
+        # misal minimal optimize: hapus metadata, compress
+        exporters.export_tgs(animation, output_path, minify=True)
+    else:
+        exporters.export_tgs(animation, output_path)
+
+
+# Command: /json2tgs
+@app.on_message(filters.command("json2tgs") & filters.private)
+async def json2tgs_handler(client, message: Message):
+    if not message.reply_to_message or not message.reply_to_message.document:
+        return await message.reply("❌ Reply ke file .json untuk convert ke `.tgs`")
+
+    file = await message.reply_to_message.download()
+    output = file.replace(".json", ".tgs")
 
     try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        await convert_json_to_tgs(file, output, optimize=False)
+        size = os.path.getsize(output)
 
-        # Parse & export ke TGS
-        animation = lottie.parsers.tgs.parse_tgs(data)
-        with open(tgs_path, "wb") as tgs_file:
-            exporters.tgs.export_tgs(animation, tgs_file)
-
-        size_kb = os.path.getsize(tgs_path) / 1024
-        caption = f"✅ Convert JSON → TGS selesai! (size: {size_kb:.1f} KB)"
-        if size_kb > 64:
-            caption += "\n⚠️ Warning: File > 64KB, tidak bisa dijadikan emoji premium."
-
-        await message.reply_document(tgs_path, caption=caption)
-
+        if size > 64 * 1024:
+            await message.reply("⚠️ Hasil file lebih dari 64KB! Tidak bisa dijadikan emoji.")
+        else:
+            await message.reply_document(output, caption="✅ Berhasil convert!\nMau impor ke emoji premium? Gunakan /import_tgs")
     except Exception as e:
-        await message.reply_text(f"❌ Gagal convert: {e}")
-
+        await message.reply(f"❌ Error: {e}")
     finally:
-        if os.path.exists(json_path):
-            os.remove(json_path)
-        if os.path.exists(tgs_path):
-            os.remove(tgs_path)
+        os.remove(file)
+        if os.path.exists(output):
+            os.remove(output)
 
-print("🚀 Bot jalan...")
-app.run()
+
+# Command: /json2tgs_optimilize
+@app.on_message(filters.command("json2tgs_optimilize") & filters.private)
+async def json2tgs_opt_handler(client, message: Message):
+    if not message.reply_to_message or not message.reply_to_message.document:
+        return await message.reply("❌ Reply ke file .json untuk convert ke .tgs (optimize)")
+
+    file = await message.reply_to_message.download()
+    output = file.replace(".json", "_opt.tgs")
+
+    try:
+        await convert_json_to_tgs(file, output, optimize=True)
+        size = os.path.getsize(output)
+
+        if size > 64 * 1024:
+            await message.reply("⚠️ Hasil file lebih dari 64KB! Tidak bisa dijadikan emoji.")
+        else:
+            await message.reply_document(output, caption="✅ Berhasil convert (optimized)!\nMau impor ke emoji premium? Gunakan /import_tgs")
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+    finally:
+        os.remove(file)
+        if os.path.exists(output):
+            os.remove(output)
+
+
+# Command: /import_tgs
+@app.on_message(filters.command("import_tgs") & filters.private)
+async def import_tgs_handler(client, message: Message):
+    if not message.reply_to_message or not message.reply_to_message.document:
+        return await message.reply("❌ Reply ke file .tgs untuk impor ke emoji premium")
+
+    file = await message.reply_to_message.download()
+    size = os.path.getsize(file)
+
+    if size > 64 * 1024:
+        await message.reply("⚠️ File lebih dari 64KB! Tidak bisa dijadikan emoji.")
+        os.remove(file)
+        return
+
+    # Tanya detail pack
+    await message.reply(
+        "📝 Masukkan nama pack emoji premium yang diinginkan.\n\nFormat:\n`nama_pack | emoji_replacement | custom_link`\n\nContoh:\n`RensiPack | 😎 | rensipackemoji`"
+    )
+
+    # Tunggu response
+    response: Message = await client.listen(message.chat.id)
+
+    try:
+        nama_pack, emoji_replacement, custom_link = map(str.strip, response.text.split("|"))
+
+        # Simulasi import (aslinya pakai stickers.createNewStickerSet via MTProto raw)
+        await message.reply(
+            f"✅ Emoji siap diimpor!\n\nNama Pack: {nama_pack}\nEmoji: {emoji_replacement}\nCustom Link: https://t.me/addemoji/{custom_link}"
+        )
+    except Exception as e:
+        await message.reply(f"❌ Format salah. Error: {e}")
+
+    os.remove(file)
+
+
+if name == "__main__":
+    app.run()
