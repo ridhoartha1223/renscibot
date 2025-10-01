@@ -6,7 +6,8 @@ from pyrogram.types import Message
 import lottie
 from lottie.exporters import exporters
 from lottie.parsers.tgs import parse_tgs
-
+import time
+time.time = lambda: int(time.time())
 
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
@@ -117,5 +118,6 @@ async def import_tgs_handler(client, message: Message):
 
 if __name__ == "__main__":
     app.run()
+
 
 
