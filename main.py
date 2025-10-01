@@ -120,6 +120,8 @@ async def import_tgs_handler(client, message: Message):
 
     
     if __name__ == "__main__":
+        print("🚀 Bot is starting...")
         app.run()
+
 
 
