@@ -125,7 +125,8 @@ async def import_tgs_handler(client, message: Message):
 @app.on_message(filters.private)
 async def debug_test(client, message):
     await message.reply_text("✅ Bot connected and working!")
-        app.run()
+    app.run()
+
 
 
 
