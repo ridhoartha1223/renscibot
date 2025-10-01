@@ -13,7 +13,14 @@ API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-app = Client("emoji-bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client(
+    "emoji-bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    no_updates=False,   # biar tetap jalan
+    workdir="./session"
+)
 
 
 # Helper: JSON to TGS
@@ -118,6 +125,7 @@ async def import_tgs_handler(client, message: Message):
 
 if __name__ == "__main__":
     app.run()
+
 
 
 
