@@ -117,6 +117,9 @@ async def import_tgs_handler(client, message: Message):
         await message.reply(f"❌ Format salah. Error: {e}")
 
     os.remove(file)
+
+    
     if __name__ == "__main__":
-    app.run()
+        app.run()
+
 
