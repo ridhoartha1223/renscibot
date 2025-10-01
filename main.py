@@ -1,7 +1,6 @@
 import os
 import asyncio
 import json
-import aiofiles
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import lottie
@@ -118,3 +117,4 @@ async def import_tgs_handler(client, message: Message):
 
 if name == "__main__":
     app.run()
+
