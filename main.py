@@ -1,8 +1,7 @@
 import os
+import subprocess
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-import lottie
-from lottie.exporters import exporters
 
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
@@ -10,15 +9,16 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 app = Client(":memory:", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Simpan state user sementara
-user_state = {}  # {user_id: action}
+user_state = {}  # simpan state sementara user
 
 
-# Helper: JSON to TGS (compatible lottie terbaru)
-def convert_json_to_tgs(input_path, output_path, optimize=False):
-    animation = lottie.parsers.tgs.parse_tgs(input_path)  # parse dari path
-    tgs_exporter = exporters.get_exporter("tgs")         # ambil TGS exporter terbaru
-    tgs_exporter.export(animation, output_path, minify=optimize)
+# Helper: Convert JSON -> TGS via lottie2tgs CLI
+def convert_json_to_tgs_cli(input_path, output_path, optimize=False):
+    cmd = ["lottie2tgs", input_path, output_path]
+    if optimize:
+        cmd.append("--minify")
+    # jalankan subprocess
+    subprocess.run(cmd, check=True)
 
 
 # /start → menu interaktif
@@ -35,7 +35,7 @@ async def start(client, message):
 @app.on_callback_query()
 async def callback_handler(client, query):
     action = query.data
-    user_state[query.from_user.id] = action  # simpan state
+    user_state[query.from_user.id] = action
 
     if action == "json2tgs":
         await query.message.reply("Silakan kirim file .json yang ingin di-convert ke `.tgs`")
@@ -43,42 +43,35 @@ async def callback_handler(client, query):
         await query.message.reply("Silakan kirim file .json yang ingin di-convert ke .tgs (optimized)")
 
 
-# Handler document → cek state user
+# Handler document
 @app.on_message(filters.document)
 async def document_handler(client, message: Message):
     action = user_state.get(message.from_user.id)
     if not action:
-        return  # user belum pilih fitur
+        return
 
     file_path = await message.download()
-    output = None
+    output = file_path.replace(".json", "_converted.tgs")
 
     try:
-        if action == "json2tgs":
-            output = file_path.replace(".json", ".tgs")
-            convert_json_to_tgs(file_path, output, optimize=False)
-        elif action == "json2tgs_opt":
-            output = file_path.replace(".json", "_opt.tgs")
-            convert_json_to_tgs(file_path, output, optimize=True)
+        optimize = True if action == "json2tgs_opt" else False
+        convert_json_to_tgs_cli(file_path, output, optimize=optimize)
 
-        # Cek ukuran
         size = os.path.getsize(output)
         if size > 64 * 1024:
             await message.reply("⚠️ Hasil file lebih dari 64KB! Tidak bisa dijadikan emoji.")
         else:
             await message.reply_document(output, caption="✅ Berhasil convert!")
 
+    except subprocess.CalledProcessError as e:
+        await message.reply(f"❌ Error convert: {e}")
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
-
     finally:
-        # Hapus file sementara
         if os.path.exists(file_path):
             os.remove(file_path)
-        if output and os.path.exists(output):
+        if os.path.exists(output):
             os.remove(output)
-
-        # Reset state user
         user_state.pop(message.from_user.id, None)
 
 
@@ -89,9 +82,8 @@ async def debug_ping(client, message):
 
 
 if __name__ == "__main__":
-    print("🚀 Bot is starting...")
+    print("🚀 Bot starting...")
     app.start()
-    print("🚀 Bot is running...")
-    idle()  # tunggu update Telegram
+    print("🚀 Bot running...")
+    idle()
     app.stop()
-
