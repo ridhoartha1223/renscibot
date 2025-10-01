@@ -1,5 +1,4 @@
 import os
-import json
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 import lottie
@@ -17,9 +16,7 @@ user_state = {}  # {user_id: action}
 
 # Helper: JSON to TGS
 def convert_json_to_tgs(input_path, output_path, optimize=False):
-    with open(input_path, "r", encoding="utf-8") as f:
-        json_data = json.load(f)
-    animation = lottie.parsers.tgs.parse_tgs(json_data)
+    animation = lottie.parsers.tgs.parse_tgs(input_path)  # langsung path
     exporters.export_tgs(animation, output_path, minify=optimize)
 
 
@@ -28,8 +25,7 @@ def convert_json_to_tgs(input_path, output_path, optimize=False):
 async def start(client, message):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("JSON → TGS", callback_data="json2tgs")],
-        [InlineKeyboardButton("JSON → TGS (Optimize)", callback_data="json2tgs_opt")],
-        [InlineKeyboardButton("Import TGS", callback_data="import_tgs")]
+        [InlineKeyboardButton("JSON → TGS (Optimize)", callback_data="json2tgs_opt")]
     ])
     await message.reply("Selamat datang! Pilih fitur:", reply_markup=keyboard)
 
@@ -44,8 +40,6 @@ async def callback_handler(client, query):
         await query.message.reply("Silakan kirim file .json yang ingin di-convert ke `.tgs`")
     elif action == "json2tgs_opt":
         await query.message.reply("Silakan kirim file .json yang ingin di-convert ke .tgs (optimized)")
-    elif action == "import_tgs":
-        await query.message.reply("Silakan kirim file .tgs yang ingin di-import ke emoji premium (simulasi)")
 
 
 # Handler document → cek state user
@@ -65,20 +59,13 @@ async def document_handler(client, message: Message):
         elif action == "json2tgs_opt":
             output = file_path.replace(".json", "_opt.tgs")
             convert_json_to_tgs(file_path, output, optimize=True)
-        elif action == "import_tgs":
-            size = os.path.getsize(file_path)
-            if size > 64 * 1024:
-                await message.reply("⚠️ File lebih dari 64KB! Tidak bisa dijadikan emoji.")
-                return
-            # Simulasi import
-            await message.reply("✅ File siap diimpor! (simulasi emoji premium)")
 
-        if output:
-            size = os.path.getsize(output)
-            if size > 64 * 1024:
-                await message.reply("⚠️ Hasil file lebih dari 64KB! Tidak bisa dijadikan emoji.")
-            else:
-                await message.reply_document(output, caption="✅ Berhasil convert!")
+        # Cek ukuran
+        size = os.path.getsize(output)
+        if size > 64 * 1024:
+            await message.reply("⚠️ Hasil file lebih dari 64KB! Tidak bisa dijadikan emoji.")
+        else:
+            await message.reply_document(output, caption="✅ Berhasil convert!")
 
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
