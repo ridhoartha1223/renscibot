@@ -117,12 +117,13 @@ async def debug_test(client, message):
         await message.reply_text("✅ Bot connected and working!")
 
 
-if name == "__main__":
+if __name__ == "__main__":
     print("🚀 Bot is starting...")
     app.start()
     print("🚀 Bot is running...")
     idle()  # tunggu update Telegram
     app.stop()
+
 
 
 
