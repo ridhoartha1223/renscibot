@@ -17,7 +17,8 @@ user_state = {}  # {user_id: action}
 # Helper: JSON to TGS (compatible lottie terbaru)
 def convert_json_to_tgs(input_path, output_path, optimize=False):
     animation = lottie.parsers.tgs.parse_tgs(input_path)  # parse dari path
-    exporters.TgsExporter(animation).export(output_path, minify=optimize)  # versi terbaru
+    tgs_exporter = exporters.get_exporter("tgs")         # ambil TGS exporter terbaru
+    tgs_exporter.export(animation, output_path, minify=optimize)
 
 
 # /start → menu interaktif
@@ -87,7 +88,7 @@ async def debug_ping(client, message):
     await message.reply("✅ Bot connected and working!")
 
 
-if __name__ == "__main__":
+if name == "__main__":
     print("🚀 Bot is starting...")
     app.start()
     print("🚀 Bot is running...")
