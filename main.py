@@ -1,163 +1,109 @@
 import os
-import tempfile
-import asyncio
-from pyrogram import Client, filters, idle
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from lottie import parsers, exporters
-from removebg import RemoveBg
-import ntplib
+import json
+import lottie
+from lottie.exporters import exporters
+from pyrogram import Client, filters
+from pyrogram.raw import functions
 
-# --- Environment Variables Railway ---
-API_HASH = os.getenv("API_HASH")
+# ENV Vars
 API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-REMOVE_BG_API = os.getenv("REMOVE_BG_API")
 
-# --- Initialize Bot ---
-bot = Client("emoji_bot",
-             api_id=API_ID,
-             api_hash=API_HASH,
-             bot_token=BOT_TOKEN)
+# Bot
+bot = Client("emoji_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# --- User state for interactive import ---
-user_state = {}
+# Database sementara (dict)
+user_packs = {}
 
-# --- Helper Functions ---
-def json_to_tgs(json_file_path, optimize=False):
-    animation = parsers.tgs.parse_tgs(json_file_path)
-    # Optimasi sederhana, compatible dengan lottie 0.7.x
-    tgs_path = json_file_path.replace(".json", "_converted.tgs")
-    exporters.tgs.export_tgs(animation, tgs_path)
-    return tgs_path
-
-def check_size_limit(file_path):
-    return os.path.getsize(file_path) > 64 * 1024
-
-# --- Time sync to prevent BadMsgNotification ---
-def sync_time():
-    try:
-        c = ntplib.NTPClient()
-        response = c.request('pool.ntp.org')
-        offset = response.offset
-        print(f"NTP offset: {offset} seconds")
-    except Exception as e:
-        print("Gagal sinkronisasi waktu:", e)
-
-# --- Start command ---
+# Start Command
 @bot.on_message(filters.command("start"))
-async def start_cmd(client, message: Message):
+async def start_cmd(client, message):
     await message.reply_text(
-        "👋 Selamat datang di Emoji Bot!\n\n"
-        "Fitur:\n"
-        "/json2tgs - Convert .json → .tgs\n"
-        "/json2tgs_optimize - Convert .json → .tgs (optimized)\n"
-        "/import_tgs - Import .tgs ke New Premium Emoji Pack\n"
-        "/removebg - Remove background gambar"
+        "👋 Halo!\n\n"
+        "Aku bisa convert file .json ke .tgs lalu otomatis bikin EmojiPack.\n\n"
+        "📌 Command:\n"
+        "`/newpack <nama>` - bikin pack baru\n"
+        "`/add` - tambah emoji ke pack\n"
+        "atau cukup kirim .json, aku auto convert & masukkan ke pack ✨"
     )
 
-# --- Upload JSON untuk auto convert ---
-@bot.on_message(filters.document & filters.regex(r".*\.json$"))
-async def handle_json(client, message: Message):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        json_path = os.path.join(tmpdir, message.document.file_name)
-        await message.download(file_path=json_path)
-        tgs_path = json_to_tgs(json_path)
-        size_warning = check_size_limit(tgs_path)
-        caption = "✅ Konversi selesai."
-        if size_warning:
-            caption += "\n⚠️ File .tgs lebih dari 64KB, mungkin tidak bisa dijadikan emoji premium."
+# Buat pack baru
+@bot.on_message(filters.command("newpack"))
+async def newpack_cmd(client, message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        return await message.reply_text("⚠️ Gunakan: `/newpack nama_pack`")
 
-        # Kirim hasil TGS
-        sent = await message.reply_document(tgs_path, caption=caption)
+    pack_name = args[1]
+    user_id = message.from_user.id
+    username = message.from_user.username or f"user{user_id}"
 
-        # Simpan state user untuk inline buttons import
-        user_state[message.from_user.id] = {
-            "tgs_path": tgs_path,
-            "step": "ask_import"
-        }
+    short_name = f"rensci_{username}_by_{client.me.username}"
+    user_packs[user_id] = short_name
 
-        # Kirim inline button
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Import ke New Premium Emoji Pack", callback_data="import_yes")],
-            [InlineKeyboardButton("❌ Skip", callback_data="import_no")]
-        ])
-        await message.reply_text("Apakah ingin mengimpor file ini sebagai New Premium Emoji Pack?", reply_markup=buttons)
+    try:
+        await client.invoke(
+            functions.stickers.CreateStickerSet(
+                user_id=user_id,
+                title=pack_name,
+                short_name=short_name,
+                stickers=[]
+            )
+        )
+        await message.reply_text(f"✅ Pack baru dibuat: [klik disini](https://t.me/addemoji/{short_name})", disable_web_page_preview=True)
+    except Exception as e:
+        await message.reply_text(f"❌ Gagal bikin pack: {e}")
 
-# --- Callback button handler ---
-@bot.on_callback_query()
-async def button_handler(client, callback_query):
-    user_id = callback_query.from_user.id
-    state = user_state.get(user_id)
-    if not state:
-        await callback_query.answer("State tidak ditemukan.", show_alert=True)
+# Handler kirim JSON
+@bot.on_message(filters.document)
+async def handle_json(client, message):
+    if not message.document.file_name.endswith(".json"):
         return
 
-    if callback_query.data == "import_yes":
-        state["step"] = "input_pack_name"
-        await callback_query.message.reply_text("Masukkan nama New Premium Emoji Pack:")
-    elif callback_query.data == "import_no":
-        user_state.pop(user_id)
-        await callback_query.message.reply_text("❌ Proses import dibatalkan.")
-    await callback_query.answer()
-
-# --- Handle interactive text input for import ---
-@bot.on_message(filters.text)
-async def handle_text(client, message: Message):
     user_id = message.from_user.id
-    state = user_state.get(user_id)
-    if not state: return
+    if user_id not in user_packs:
+        return await message.reply_text("⚠️ Kamu belum punya pack! Bikin dulu dengan /newpack namanya.")
 
-    step = state.get("step")
+    # Download JSON
+    json_path = await message.download(file_name="input.json")
+    tgs_path = "output.tgs"
 
-    if step == "input_pack_name":
-        state["pack_name"] = message.text
-        state["step"] = "input_emoji"
-        await message.reply_text("Masukkan replacement emoji untuk pack ini (misal: 😎):")
-    elif step == "input_emoji":
-        state["emoji"] = message.text
-        state["step"] = "input_link"
-        await message.reply_text("Masukkan link referensi (optional) atau ketik 'skip' untuk lewati:")
-    elif step == "input_link":
-        link_input = message.text
-        state["link"] = None if link_input.lower() == "skip" else link_input
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-        # Buat instruksi siap pakai
-        pack_name = state["pack_name"]
-        ready_text = f"✅ New Premium Emoji Pack siap diimpor!\n\n" \
-                     f"Nama Pack: {pack_name}\n" \
-                     f"Replacement Emoji: {state['emoji']}\n\n" \
-                     f"Langkah Import:\n" \
-                     f"1. Buka akun Telegram Premium.\n" \
-                     f"2. Pilih 'Add Emoji Pack'.\n" \
-                     f"3. Upload file .tgs berikut:"
+        animation = lottie.parsers.tgs.parse_tgs(data)
+        with open(tgs_path, "wb") as tgs_file:
+            exporters.tgs.export_tgs(animation, tgs_file)
 
-        if state["link"]:
-            ready_text += f"\n📌 Referensi Link: {state['link']}"
+        # Upload ke emoji pack
+        short_name = user_packs[user_id]
+        emoji_char = "😎"  # default emoji
 
-        await message.reply_text(ready_text)
-        await message.reply_document(state["tgs_path"], caption="File .tgs untuk import")
+        with open(tgs_path, "rb") as sticker_file:
+            await client.invoke(
+                functions.stickers.AddStickerToSet(
+                    stickerset=await client.invoke(
+                        functions.stickers.CheckShortName(short_name=short_name)
+                    ),
+                    sticker=functions.inputStickerSetItem.InputStickerSetItem(
+                        document=await client.save_file(sticker_file),
+                        emoji=emoji_char
+                    )
+                )
+            )
 
-        # Bersihkan state
-        user_state.pop(user_id)
+        await message.reply_text(f"✅ Ditambah ke pack: [klik disini](https://t.me/addemoji/{short_name})", disable_web_page_preview=True)
 
-# --- Remove background ---
-@bot.on_message(filters.command("removebg") & filters.photo)
-async def remove_bg(client, message: Message):
-    photo_path = await message.download()
-    rmbg = RemoveBg(REMOVE_BG_API, "error.log")
-    output_path = photo_path.replace(".jpg", "_transparent.png").replace(".png", "_transparent.png")
-    rmbg.remove_background_from_img_file(photo_path)
-    await message.reply_document(output_path, caption="✅ Background dihapus (transparan).")
+    except Exception as e:
+        await message.reply_text(f"❌ Error: {e}")
 
-# --- Main async run ---
-async def main():
-    sync_time()
-    await bot.start()
-    print("Bot started!")
-    await idle()
-    await bot.stop()
+    finally:
+        if os.path.exists(json_path):
+            os.remove(json_path)
+        if os.path.exists(tgs_path):
+            os.remove(tgs_path)
 
-if __name__ == "__main__":
-    asyncio.run(main())
-
-
+print("🚀 Bot jalan...")
+bot.run()
