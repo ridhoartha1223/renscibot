@@ -1,38 +1,32 @@
 import os
-import asyncio
 import json
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import lottie
 from lottie.exporters import exporters
-from lottie.parsers.tgs import parse_tgs
-import time
-time.time = lambda: int(time.time())
+
 
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
+# Pakai session in-memory (tidak pakai SQLite file)
 app = Client(
-    "emoji-bot",
+    ":memory:",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-    no_updates=False,   # biar tetap jalan
-    workdir="./session"
+    bot_token=BOT_TOKEN
 )
 
 
 # Helper: JSON to TGS
-async def convert_json_to_tgs(input_path, output_path, optimize=False):
+def convert_json_to_tgs(input_path, output_path, optimize=False):
     with open(input_path, "r", encoding="utf-8") as f:
         json_data = json.load(f)
 
-    # load animation
     animation = lottie.parsers.tgs.parse_tgs(json_data)
 
     if optimize:
-        # misal minimal optimize: hapus metadata, compress
         exporters.export_tgs(animation, output_path, minify=True)
     else:
         exporters.export_tgs(animation, output_path)
@@ -48,7 +42,7 @@ async def json2tgs_handler(client, message: Message):
     output = file.replace(".json", ".tgs")
 
     try:
-        await convert_json_to_tgs(file, output, optimize=False)
+        convert_json_to_tgs(file, output, optimize=False)
         size = os.path.getsize(output)
 
         if size > 64 * 1024:
@@ -58,7 +52,8 @@ async def json2tgs_handler(client, message: Message):
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
     finally:
-        os.remove(file)
+        if os.path.exists(file):
+            os.remove(file)
         if os.path.exists(output):
             os.remove(output)
 
@@ -73,7 +68,7 @@ async def json2tgs_opt_handler(client, message: Message):
     output = file.replace(".json", "_opt.tgs")
 
     try:
-        await convert_json_to_tgs(file, output, optimize=True)
+        convert_json_to_tgs(file, output, optimize=True)
         size = os.path.getsize(output)
 
         if size > 64 * 1024:
@@ -83,7 +78,8 @@ async def json2tgs_opt_handler(client, message: Message):
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
     finally:
-        os.remove(file)
+        if os.path.exists(file):
+            os.remove(file)
         if os.path.exists(output):
             os.remove(output)
 
@@ -107,25 +103,20 @@ async def import_tgs_handler(client, message: Message):
         "📝 Masukkan nama pack emoji premium yang diinginkan.\n\nFormat:\n`nama_pack | emoji_replacement | custom_link`\n\nContoh:\n`RensiPack | 😎 | rensipackemoji`"
     )
 
-    # Tunggu response
     response: Message = await client.listen(message.chat.id)
 
     try:
         nama_pack, emoji_replacement, custom_link = map(str.strip, response.text.split("|"))
 
-        # Simulasi import (aslinya pakai stickers.createNewStickerSet via MTProto raw)
+        # Simulasi hasil import
         await message.reply(
             f"✅ Emoji siap diimpor!\n\nNama Pack: {nama_pack}\nEmoji: {emoji_replacement}\nCustom Link: https://t.me/addemoji/{custom_link}"
         )
+
     except Exception as e:
         await message.reply(f"❌ Format salah. Error: {e}")
 
     os.remove(file)
-
-
-if __name__ == "__main__":
+    if __name__ == "__main__":
     app.run()
-
-
-
 
