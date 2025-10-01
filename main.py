@@ -119,13 +119,14 @@ async def import_tgs_handler(client, message: Message):
     os.remove(file)
 
     
-    if __name__ == "__main__":
-       print("🚀 Bot is starting...")
+  from pyrogram import idle
 
-@app.on_message(filters.private)
-async def debug_test(client, message):
-    await message.reply_text("✅ Bot connected and working!")
-    app.run()
+if name == "__main__":
+    app.start()
+    print("🚀 Bot is running...")
+    idle()  # tunggu update dari Telegram
+    app.stop()
+
 
 
 
