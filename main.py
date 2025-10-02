@@ -6,6 +6,10 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFi
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
+
+# =========================================================
+# Helper: convert JSON -> gzip TGS
+# =========================================================
 def gzip_bytes(data: bytes) -> BytesIO:
     out = BytesIO()
     with gzip.GzipFile(fileobj=out, mode="w") as f:
@@ -63,6 +67,9 @@ def compress_json_bytes(json_bytes: bytes) -> BytesIO:
     out.seek(0)
     return out
 
+# =========================================================
+# Emoji Generator Effects
+# =========================================================
 def apply_effect(data, effect):
     for layer in data.get("layers", []):
         ks = layer.get("ks", {})
@@ -81,7 +88,8 @@ def generate_emoji_with_effect(json_bytes: bytes, effect: str) -> BytesIO:
     data = apply_effect(data, effect)
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
-    def extract_json_info(json_bytes: bytes) -> str:
+
+def extract_json_info(json_bytes: bytes) -> str:
     try:
         data = json.loads(json_bytes.decode("utf-8"))
         layers = len(data.get("layers", []))
@@ -271,7 +279,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
-        def main():
+def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
