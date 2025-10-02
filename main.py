@@ -1,21 +1,3 @@
-Gaspol! 💨 Berikut ini versi lengkap dan final dari `main.py` kamu, sudah digabung semua fitur:
-
----
-
-### ✅ Fitur Lengkap
-- Convert JSON → TGS (Normal, Optimized, Reduce Keyframes)
-- Compress JSON → JSON kecil
-- Preview info JSON (nama, layer, durasi)
-- Auto detect keyframe dan size
-- Notifikasi jika size > 64KB + rekomendasi metode pengurangan
-- Inline tombol pilihan metode optimasi
-- Auto-hapus pesan bot sebelumnya biar chat rapi
-
----
-
-### 📦 File `main.py` (langsung copy-paste)
-
-```python
 import os
 import json
 import gzip
@@ -280,3 +262,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
