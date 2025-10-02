@@ -227,4 +227,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Main
 # =========================================================
 def main():
-    app = Application.builder().token(TOKEN).
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("menu", menu))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    app.add_handler(CallbackQueryHandler(button))
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
