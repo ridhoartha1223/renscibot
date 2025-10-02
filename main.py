@@ -18,12 +18,12 @@ from telegram.ext import (
 )
 
 # --------- Utilities ----------
-def gzip_bytes(data_bytes: bytes, filename: str = "emoji.tgs") -> BytesIO:
+def gzip_bytes(data_bytes: bytes) -> BytesIO:
     buf = BytesIO()
     with gzip.GzipFile(fileobj=buf, mode="w", compresslevel=9) as f:
         f.write(data_bytes)
     buf.seek(0)
-    buf.name = filename
+    buf.name = "emoji.tgs"   # wajib pakai nama ini supaya Telegram paham animasi
     return buf
 
 def size_kb(buf: BytesIO) -> float:
@@ -31,22 +31,19 @@ def size_kb(buf: BytesIO) -> float:
 
 # --------- Converters ----------
 def convert_json_to_tgs(json_bytes: bytes) -> BytesIO:
-    """Normal: langsung bungkus JSON ke TGS gzip"""
     data = json.loads(json_bytes.decode("utf-8"))
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return gzip_bytes(compact, filename="emoji.tgs")
+    return gzip_bytes(compact)
 
 def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
-    """Optimized: hapus property ga penting, kurangi presisi, turunin fps"""
     data = json.loads(json_bytes.decode("utf-8"))
 
     # fps max 20
     if "fr" in data:
         try:
-            fr = float(data["fr"])
-            if fr > 20:
+            if float(data["fr"]) > 20:
                 data["fr"] = 20
-        except Exception:
+        except:
             pass
 
     # hapus property ga penting
@@ -65,7 +62,7 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
                 cleanup(item)
     cleanup(data)
 
-    # kurangi presisi angka
+    # round angka
     def round_numbers(obj):
         if isinstance(obj, dict):
             return {k: round_numbers(v) for k, v in obj.items()}
@@ -77,11 +74,19 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
     data = round_numbers(data)
 
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return gzip_bytes(compact, filename="emoji_optimized.tgs")
+    return gzip_bytes(compact)
 
 def simplify_keyframes(json_bytes: bytes, step: int = 2) -> BytesIO:
-    """Kurangi jumlah keyframes + buletin angka"""
     data = json.loads(json_bytes.decode("utf-8"))
+
+    def round_numbers(obj):
+        if isinstance(obj, dict):
+            return {k: round_numbers(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [round_numbers(v) for v in obj]
+        elif isinstance(obj, float):
+            return round(obj, 3)
+        return obj
 
     def traverse_and_reduce(obj):
         if isinstance(obj, dict):
@@ -95,30 +100,20 @@ def simplify_keyframes(json_bytes: bytes, step: int = 2) -> BytesIO:
             for item in obj:
                 traverse_and_reduce(item)
 
-    def round_numbers(obj):
-        if isinstance(obj, dict):
-            return {k: round_numbers(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [round_numbers(v) for v in obj]
-        elif isinstance(obj, float):
-            return round(obj, 3)
-        return obj
-
-    if "layers" in data and isinstance(data["layers"], list):
+    if "layers" in data:
         for layer in data["layers"]:
             traverse_and_reduce(layer)
 
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return gzip_bytes(compact, filename="emoji_reduced_kf.tgs")
+    return gzip_bytes(compact)
 
 def reduce_duration(json_bytes: bytes, factor: float = 0.5) -> BytesIO:
-    """Potong durasi animasi"""
     data = json.loads(json_bytes.decode("utf-8"))
     ip = data.get("ip", 0)
     op = data.get("op", None)
     if op is None:
         compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
-        return gzip_bytes(compact, filename="emoji_reduced_dur.tgs")
+        return gzip_bytes(compact)
 
     duration = max(1, op - ip)
     new_duration = max(1, int(duration * factor))
@@ -129,7 +124,7 @@ def reduce_duration(json_bytes: bytes, factor: float = 0.5) -> BytesIO:
         if isinstance(obj, dict):
             for k, v in list(obj.items()):
                 if k == "k" and isinstance(v, list):
-                    obj[k] = [e for e in v if not isinstance(e, dict) or "t" not in e or e["t"] < new_op]
+                    obj[k] = [e for e in v if not (isinstance(e, dict) and "t" in e and e["t"] >= new_op)]
                 else:
                     prune_by_time(v)
         elif isinstance(obj, list):
@@ -141,11 +136,11 @@ def reduce_duration(json_bytes: bytes, factor: float = 0.5) -> BytesIO:
             prune_by_time(layer)
 
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return gzip_bytes(compact, filename="emoji_reduced_dur.tgs")
+    return gzip_bytes(compact)
 
 # --------- Handlers ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Kirim file .json (Bodymovin), lalu pilih mode untuk convert ke .tgs (emoji).")
+    await update.message.reply_text("👋 Kirim file .json (Bodymovin), lalu pilih mode konversi ke .tgs (emoji).")
 
 async def handle_json(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
@@ -158,8 +153,8 @@ async def handle_json(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["json_bytes"] = bytes(json_bytes)
 
     keyboard = [
-        [InlineKeyboardButton("🔄 JSON → TGS (Normal)", callback_data="normal")],
-        [InlineKeyboardButton("⚡ JSON → TGS (Optimized)", callback_data="optimize")],
+        [InlineKeyboardButton("🔄 Normal", callback_data="normal")],
+        [InlineKeyboardButton("⚡ Optimized", callback_data="optimize")],
     ]
     await update.message.reply_text("Pilih mode konversi:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -183,28 +178,29 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mode = "Reduced Keyframes"
         elif query.data == "reduce_duration":
             tgs_buf = reduce_duration(data, factor=0.5)
-            mode = "Reduced Duration (50%)"
+            mode = "Reduced Duration"
         else:
             return
 
         kb = size_kb(tgs_buf)
 
+        # kirim selalu sebagai sticker
         await query.message.reply_sticker(sticker=InputFile(tgs_buf, filename=tgs_buf.name))
 
         if len(tgs_buf.getvalue()) <= 64 * 1024:
-            info = f"✅🟢 {mode}\n📦 Ukuran: {kb} KB\nSiap dipakai sebagai Emoji Premium 🚀"
-            await query.message.reply_text(info, parse_mode="Markdown")
+            msg = f"✅🟢 {mode}\n📦 Ukuran: {kb} KB\nSiap dipakai sebagai Emoji Premium 🚀"
+            await query.message.reply_text(msg, parse_mode="Markdown")
         else:
-            info = (
+            msg = (
                 f"❌🔴 {mode}\n📦 Ukuran: {kb} KB\n"
-                "⚠️ Melebihi batas 64 KB.\nCoba opsi optimasi:"
+                "⚠️ Melebihi batas 64 KB.\nPilih opsi optimasi:"
             )
             keyboard = [
                 [InlineKeyboardButton("✂️ Kurangi Keyframes", callback_data="reduce_keyframes")],
                 [InlineKeyboardButton("⏱ Kurangi Durasi 50%", callback_data="reduce_duration")],
                 [InlineKeyboardButton("🔁 Optimized", callback_data="optimize")],
             ]
-            await query.message.reply_text(info, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     except Exception as e:
         await query.message.reply_text(f"❌ Error: {e}")
