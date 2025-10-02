@@ -71,7 +71,7 @@ def auto_compress(json_bytes: bytes) -> (BytesIO, str, float):
         if size_kb <= 64:
             return tgs_file, name, size_kb
 
-    # fallback: kembalikan hasil terakhir
+    # fallback: hasil terakhir
     return tgs_file, name, size_kb
 
 # =========================================================
@@ -89,8 +89,6 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🎨 Convert JSON", callback_data="menu_convert")],
         [InlineKeyboardButton("⚡ Auto Compress", callback_data="menu_autocompress")],
-        [InlineKeyboardButton("📦 History (soon)", callback_data="menu_history")],
-        [InlineKeyboardButton("➕ Add to Pack (soon)", callback_data="menu_addpack")]
     ]
     await update.message.reply_text(
         "📋 *Dashboard Emoji Bot*\nPilih menu yang kamu mau:",
@@ -108,20 +106,50 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     json_bytes = await file.download_as_bytearray()
     context.user_data["json_bytes"] = json_bytes
 
-    keyboard = [
-        [InlineKeyboardButton("🎨 Normal", callback_data="normal")],
-        [InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
-        [InlineKeyboardButton("🤖 Auto Compress", callback_data="autocompress")]
-    ]
-    await update.message.reply_text(
-        "✅ File JSON diterima!\nPilih metode konversi:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    # cek mode yang dipilih user
+    mode_selected = context.user_data.get("mode", "manual")
+
+    if mode_selected == "convert":
+        keyboard = [
+            [InlineKeyboardButton("🎨 Normal", callback_data="normal")],
+            [InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
+            [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")]
+        ]
+        await update.message.reply_text(
+            "✅ File JSON diterima!\nPilih metode konversi:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif mode_selected == "autocompress":
+        # langsung auto compress
+        tgs_file, mode, size_kb = auto_compress(json_bytes)
+        await update.message.reply_sticker(sticker=tgs_file)
+        await update.message.reply_text(
+            f"✅ Mode: *{mode}*\n"
+            f"📦 Size: {size_kb:.2f} KB",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            "✅ File JSON diterima!\nGunakan tombol untuk memilih mode konversi."
+        )
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # menu dashboard
+    if query.data == "menu_convert":
+        context.user_data["mode"] = "convert"
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Convert*.")
+        return
+
+    if query.data == "menu_autocompress":
+        context.user_data["mode"] = "autocompress"
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Auto Compress*.")
+        return
+
+    # pastikan ada file json
     if "json_bytes" not in context.user_data:
         await query.edit_message_text("❌ File JSON tidak ditemukan. Kirim ulang.")
         return
@@ -143,36 +171,16 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tgs_file = reduce_keyframes_json(json_bytes)
             mode = "Reduce Keyframes"
             size_kb = len(tgs_file.getvalue()) / 1024
-        elif query.data in ["autocompress", "menu_autocompress"]:
-            tgs_file, mode, size_kb = auto_compress(json_bytes)
-        elif query.data == "menu_convert":
-            await query.edit_message_text("📌 Kirim file `.json` untuk convert.")
-            return
         else:
             return
-
-        if size_kb <= 64:
-            indicator = "🟢"
-            note = "Ukuran aman untuk Emoji Premium!"
-        else:
-            indicator = "🔴"
-            note = "Masih terlalu besar!"
 
         await loading.delete()
         await query.message.reply_sticker(sticker=tgs_file)
         await query.message.reply_text(
             f"✅ Mode: *{mode}*\n"
-            f"📦 Size: {size_kb:.2f} KB\n"
-            f"{indicator} {note}",
+            f"📦 Size: {size_kb:.2f} KB",
             parse_mode="Markdown"
         )
-
-        if size_kb > 64 and query.data not in ["reduce", "autocompress"]:
-            keyboard = [[InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")]]
-            await query.message.reply_text(
-                "⚠️ File terlalu besar, mau coba kurangi keyframes?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
