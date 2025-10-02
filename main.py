@@ -226,8 +226,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
         result_msg = await query.message.reply_text(
-           
-        result_msg = await query.message.reply_text(
             f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
             parse_mode="Markdown"
         )
@@ -262,4 +260,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
