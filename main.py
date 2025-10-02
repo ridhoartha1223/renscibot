@@ -44,8 +44,8 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
         if isinstance(obj, dict):
             if "k" in obj and isinstance(obj["k"], list) and len(obj["k"]) > 2:
                 obj["k"] = obj["k"][::2]
-            for v in obj.values():
-                simplify_keyframes(v)
+            for key in obj:
+                simplify_keyframes(obj[key])
         elif isinstance(obj, list):
             for item in obj:
                 simplify_keyframes(item)
@@ -58,7 +58,6 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
 # Compress JSON (standalone, output JSON kecil)
 # =========================================================
 def compress_json_bytes(json_bytes: bytes) -> BytesIO:
-    """Compress JSON tanpa convert ke TGS"""
     data = json.loads(json_bytes.decode("utf-8"))
 
     def round_numbers(obj):
@@ -78,26 +77,6 @@ def compress_json_bytes(json_bytes: bytes) -> BytesIO:
     return out
 
 # =========================================================
-# Auto Compress Helper
-# =========================================================
-def auto_compress(json_bytes: bytes) -> (BytesIO, str, float):
-    """Coba berbagai level sampai <64KB"""
-    methods = [
-        ("Normal", json_to_tgs),
-        ("Optimized Safe", optimize_json_to_tgs),
-        ("Reduce Keyframes", reduce_keyframes_json),
-    ]
-
-    for name, func in methods:
-        tgs_file = func(json_bytes)
-        size_kb = len(tgs_file.getvalue()) / 1024
-        if size_kb <= 64:
-            return tgs_file, name, size_kb
-
-    # fallback: hasil terakhir
-    return tgs_file, name + " (⚠️ >64KB)", size_kb
-
-# =========================================================
 # Handlers
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111,7 +90,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🎨 Convert JSON → TGS", callback_data="menu_convert")],
-        [InlineKeyboardButton("⚡ Auto Compress → TGS <64KB", callback_data="menu_autocompress")],
         [InlineKeyboardButton("🗜 Compress JSON → JSON kecil", callback_data="menu_compress_json")],
         [InlineKeyboardButton("❌ Reset / Cancel", callback_data="menu_reset")]
     ]
@@ -145,15 +123,6 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-    elif mode_selected == "autocompress":
-        tgs_file, mode, size_kb = auto_compress(json_bytes)
-        await update.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
-        await update.message.reply_text(
-            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
-            parse_mode="Markdown"
-        )
-        del context.user_data["json_bytes"]
-
     elif mode_selected == "compress_json":
         compressed_file = compress_json_bytes(json_bytes)
         await update.message.reply_document(document=InputFile(compressed_file, filename="compressed.json"))
@@ -177,11 +146,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "menu_convert":
         context.user_data["mode"] = "convert"
         await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Convert → TGS*.")
-        return
-
-    if query.data == "menu_autocompress":
-        context.user_data["mode"] = "autocompress"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Auto Compress → TGS*.")
         return
 
     if query.data == "menu_compress_json":
@@ -235,3 +199,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
