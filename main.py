@@ -63,14 +63,14 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "👋 Selamat datang di *Emoji Converter Bot*\n\n"
+        "👋 Selamat datang di *Emoji Converter Bot BY RENSCI*\n\n"
         "Aku bisa mengubah file **JSON (AE/Bodymovin)** jadi animasi **TGS** untuk Emoji Premium Telegram.\n\n"
         "📌 Cara pakai:\n"
         "1️⃣ Kirim file `.json` hasil export dari After Effects\n"
-        "2️⃣ Pilih metode konversi:\n"
-        "   • 🎨 Normal → langsung jadi TGS\n"
-        "   • ⚡ Optimized Safe → lebih kecil, tetap animasi\n"
-        "3️⃣ Kalau file >64KB → akan muncul opsi ✂️ Reduce Keyframes otomatis\n\n"
+        "2️⃣ Pilih metode convert:\n"
+        "   • 👁‍🗨 Normal → langsung jadi TGS\n"
+        "   • ⚡ Optimized Safe → size lebih kecil\n"
+        "3️⃣ Kalau file >64KB → akan muncul fitur ✂️ Reduce Keyframes otomatis\n\n"
         "🚀 Ayo coba kirim file JSON-mu sekarang!"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -86,7 +86,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["json_bytes"] = json_bytes
 
     keyboard = [
-        [InlineKeyboardButton("🎨 JSON → TGS", callback_data="normal")],
+        [InlineKeyboardButton("JSON → TGS ", callback_data="normal")],
         [InlineKeyboardButton("⚡ JSON → TGS (Optimized Safe)", callback_data="optimize")]
     ]
     await update.message.reply_text(
@@ -165,3 +165,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
