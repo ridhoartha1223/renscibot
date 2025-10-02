@@ -79,7 +79,7 @@ async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_
     set_name = f"user{user.id}_emoji_{random_suffix()}_by_{BOT_USERNAME.strip('@')}"
     title = f"{user.first_name}'s Emoji Set"
 
-    sticker = InputSticker(sticker=tgs_file, emoji="😀")
+    sticker = InputSticker(sticker=tgs_file)
     stickers = [sticker]
 
     try:
@@ -88,7 +88,8 @@ async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_
             name=set_name,
             title=title,
             stickers=stickers,
-            sticker_format="animated"
+            sticker_format="animated",
+            emojis="😀"  # emoji di sini, bukan di InputSticker
         )
         link = f"https://t.me/addemoji/{set_name}"
         return link
