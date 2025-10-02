@@ -24,17 +24,25 @@ def json_to_tgs(json_bytes: bytes) -> BytesIO:
 def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
 
-    def round_numbers(obj):
+    def clean(obj):
         if isinstance(obj, dict):
-            return {k: round_numbers(v) for k, v in obj.items()}
+            new_obj = {}
+            for k, v in obj.items():
+                # Hapus properti default atau tidak penting
+                if v in [0, 0.0, False, None, "", [], {}]:
+                    continue
+                if k in ["ix", "a", "ddd", "bm", "mn", "hd", "cl", "ln", "tt"]:
+                    continue
+                new_obj[k] = clean(v)
+            return new_obj
         elif isinstance(obj, list):
-            return [round_numbers(item) for item in obj]
+            return [clean(item) for item in obj if item not in [None, {}, []]]
         elif isinstance(obj, float):
             return round(obj, 3)
         return obj
 
-    data = round_numbers(data)
-    compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
+    cleaned = clean(data)
+    compact = json.dumps(cleaned, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
 def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
@@ -236,3 +244,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
