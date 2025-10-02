@@ -63,14 +63,14 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "👋 Selamat datang di *Emoji Converter Bot BY RENSCI*\n\n"
+        "👋 Selamat datang di *Json Emoji Converter BY RENSCI*\n\n"
         "Aku bisa mengubah file **JSON (AE/Bodymovin)** jadi animasi **TGS** untuk Emoji Premium Telegram.\n\n"
         "📌 Cara pakai:\n"
-        "1️⃣ Kirim file `.json` hasil export dari After Effects\n"
-        "2️⃣ Pilih metode convert:\n"
-        "   • 👁‍🗨 Normal → langsung jadi TGS\n"
-        "   • ⚡ Optimized Safe → size lebih kecil\n"
-        "3️⃣ Kalau file >64KB → akan muncul fitur ✂️ Reduce Keyframes otomatis\n\n"
+        "1. Kirim file .json hasil export dari After Effects\n"
+        "2. Pilih metode convert:\n"
+        "   •  Normal → langsung jadi TGS\n"
+        "   •  Optimized Safe → size lebih kecil\n"
+        "3. Kalau file >64KB → akan muncul fitur ✂️ Reduce Keyframes otomatis\n\n"
         "🚀 Ayo coba kirim file JSON-mu sekarang!"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -136,15 +136,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sticker=tgs_file,
         )
         await query.message.reply_text(
-            f"✅ Konversi *{mode}* selesai!\n"
-            f"📦 Size: {size_kb:.2f} KB\n"
+            f"✅ convert *{mode}* selesai!\n"
+            f"📦 file Size: {size_kb:.2f} KB\n"
             f"{indicator} {note}",
             parse_mode="Markdown"
         )
 
         # kalau kegedean, kasih opsi reduce keyframes
         if size_kb > 64 and query.data != "reduce":
-            keyboard = [[InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")]]
+            keyboard = [[InlineKeyboardButton("✂️ kurangi Keyframes", callback_data="reduce")]]
             await query.message.reply_text(
                 "⚠️ File terlalu besar, mau coba kurangi keyframes?",
                 reply_markup=InlineKeyboardMarkup(keyboard)
@@ -165,4 +165,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
