@@ -1,3 +1,21 @@
+Gaspol! 💨 Berikut ini versi lengkap dan final dari `main.py` kamu, sudah digabung semua fitur:
+
+---
+
+### ✅ Fitur Lengkap
+- Convert JSON → TGS (Normal, Optimized, Reduce Keyframes)
+- Compress JSON → JSON kecil
+- Preview info JSON (nama, layer, durasi)
+- Auto detect keyframe dan size
+- Notifikasi jika size > 64KB + rekomendasi metode pengurangan
+- Inline tombol pilihan metode optimasi
+- Auto-hapus pesan bot sebelumnya biar chat rapi
+
+---
+
+### 📦 File `main.py` (langsung copy-paste)
+
+```python
 import os
 import json
 import gzip
@@ -28,7 +46,6 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
         if isinstance(obj, dict):
             new_obj = {}
             for k, v in obj.items():
-                # Hapus properti default atau tidak penting
                 if v in [0, 0.0, False, None, "", [], {}]:
                     continue
                 if k in ["ix", "a", "ddd", "bm", "mn", "hd", "cl", "ln", "tt"]:
@@ -82,7 +99,7 @@ def compress_json_bytes(json_bytes: bytes) -> BytesIO:
     return out
 
 # =========================================================
-# New Features: Preview & Suggestion
+# Info & Keyframe Detection
 # =========================================================
 def extract_json_info(json_bytes: bytes) -> str:
     try:
@@ -101,20 +118,17 @@ def extract_json_info(json_bytes: bytes) -> str:
     except Exception:
         return "❌ Gagal membaca isi JSON."
 
-def suggest_conversion_mode(json_bytes: bytes) -> str:
-    size_kb = len(json_bytes) / 1024
+def count_keyframes(json_bytes: bytes) -> int:
     try:
         data = json.loads(json_bytes.decode("utf-8"))
-        keyframes = sum(
-            len(layer.get("ks", {}).get("k", []))
-            for layer in data.get("layers", [])
-            if isinstance(layer.get("ks", {}).get("k", []), list)
-        )
-        if size_kb > 100 or keyframes > 100:
-            return "⚠️ File besar atau banyak keyframe. Disarankan pakai *Reduce Keyframes*."
-        return "✅ File ringan. Mode *Normal* atau *Optimized* cocok digunakan."
+        count = 0
+        for layer in data.get("layers", []):
+            for prop in layer.get("ks", {}).values():
+                if isinstance(prop, dict) and isinstance(prop.get("k"), list):
+                    count += len(prop["k"])
+        return count
     except Exception:
-        return "ℹ️ Tidak bisa mendeteksi saran otomatis."
+        return 0
 
 # =========================================================
 # Handlers
@@ -150,9 +164,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["json_bytes"] = json_bytes
 
     preview = extract_json_info(json_bytes)
-    suggestion = suggest_conversion_mode(json_bytes)
     await update.message.reply_text(preview, parse_mode="Markdown")
-    await update.message.reply_text(suggestion, parse_mode="Markdown")
 
     mode_selected = context.user_data.get("mode", "manual")
 
@@ -182,6 +194,12 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    if "last_bot_msg" in context.user_data:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data["last_bot_msg"])
+        except:
+            pass
 
     if query.data == "menu_reset":
         context.user_data.clear()
@@ -219,19 +237,37 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             return
 
+        await loading.delete()
+
         size_kb = len(tgs_file.getvalue()) / 1024
-        await loading.edit_text("✅ Proses selesai!")
+        keyframes = count_keyframes(json_bytes)
+
         await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
-        await query.message.reply_text(
+        result_msg = await query.message.reply_text(
+           
+        result_msg = await query.message.reply_text(
             f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
             parse_mode="Markdown"
         )
+        context.user_data["last_bot_msg"] = result_msg.message_id
+
+        if size_kb > 64 and keyframes > 100:
+            warning = (
+                f"⚠️ File terlalu besar ({size_kb:.2f} KB) dan punya banyak keyframe ({keyframes}).\n"
+                "Pilih metode untuk mengurangi ukuran:"
+            )
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔧 Compress", callback_data="optimize")],
+                [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")]
+            ])
+            warn_msg = await query.message.reply_text(warning, reply_markup=keyboard)
+            context.user_data["last_bot_msg"] = warn_msg.message_id
+
         del context.user_data["json_bytes"]
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
-
-# =========================================================
+        # =========================================================
 # Main
 # =========================================================
 def main():
@@ -244,4 +280,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
