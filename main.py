@@ -22,16 +22,15 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
     """Convert JSON -> TGS optimized (target <64KB untuk emoji premium)"""
     data = json.loads(json_bytes.decode("utf-8"))
 
-    # Turunkan framerate jika terlalu tinggi
+    # Turunkan framerate kalau terlalu tinggi
     if "fr" in data and data["fr"] > 30:
         data["fr"] = 30
 
     # Hapus metadata tidak penting
-    for key in ["meta"]:
-        if key in data:
-            del data[key]
+    if "meta" in data:
+        del data["meta"]
 
-    # Serialize JSON dengan compact (tanpa spasi)
+    # Serialize JSON compact
     compact = json.dumps(data, separators=(',', ':')).encode("utf-8")
 
     # Gzip ke TGS
@@ -87,10 +86,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tgs_file = optimize_json_to_tgs(json_bytes)
             mode = "Optimized"
 
-        # ✅ Kirim sebagai animasi sticker (bukan dokumen!)
-        await query.message.reply_sticker(sticker=InputFile(tgs_file, filename=tgs_file.name))
+        # ✅ Kirim sebagai animasi sticker
+        await query.message.reply_sticker(
+            sticker=InputFile(tgs_file, filename=tgs_file.name)
+        )
 
-        # Opsional: kirim juga file .tgs (backup)
+        # Reset buffer sebelum dipakai lagi
+        tgs_file.seek(0)
+
+        # ✅ Kirim juga file .tgs (backup)
         await query.message.reply_document(
             document=InputFile(tgs_file, filename=tgs_file.name),
             caption=f"✅ Konversi selesai ({mode})"
