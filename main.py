@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 
 TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")  # @username bot
-IS_PREMIUM = os.getenv("BOT_PREMIUM", "false").lower() == "true"  # true jika bot premium
+IS_PREMIUM = os.getenv("BOT_PREMIUM", "false").lower() == "true"
 
 # =========================================================
 # Helper: JSON -> gzip TGS
@@ -79,6 +79,7 @@ async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_
     set_name = f"user{user.id}_emoji_{random_suffix()}_by_{BOT_USERNAME.strip('@')}"
     title = f"{user.first_name}'s Emoji Set"
 
+    tgs_file.seek(0)  # pastikan pointer di awal
     sticker = InputSticker(sticker=tgs_file, emoji_list=["😀"], format="animated")
     stickers = [sticker]
 
@@ -115,21 +116,23 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def handle_json_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
-    if mode not in ["convert", "autocompress", "upload"]:
+    if not mode:
         return
 
     document = update.message.document
-    if not document.file_name.endswith(".json"):
-        await update.message.reply_text("❌ Tolong kirim file `.json`.")
-        return
+    file_name = document.file_name.lower()
 
-    file = await document.get_file()
-    json_bytes = await file.download_as_bytearray()
-    context.user_data["json_bytes"] = json_bytes
-
+    # ===================== JSON flow =====================
     if mode in ["convert", "autocompress"]:
+        if not file_name.endswith(".json"):
+            await update.message.reply_text("❌ Tolong kirim file `.json`.")
+            return
+        file = await document.get_file()
+        json_bytes = await file.download_as_bytearray()
+        context.user_data["json_bytes"] = json_bytes
+
         if mode == "convert":
             keyboard = [
                 [InlineKeyboardButton("🎨 Normal", callback_data="normal")],
@@ -140,25 +143,33 @@ async def handle_json_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "✅ File JSON diterima! Pilih metode:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
-        else:
+        else:  # autocompress
             tgs_file, method, size_kb = auto_compress(json_bytes)
             await update.message.reply_sticker(sticker=tgs_file)
             await update.message.reply_text(f"✅ Mode: *{method}*\n📦 Size: {size_kb:.2f} KB", parse_mode="Markdown")
+
+    # ===================== TGS flow =====================
     elif mode == "upload":
-        tgs_file, method, size_kb = auto_compress(json_bytes)
+        if not file_name.endswith(".tgs"):
+            await update.message.reply_text("❌ Tolong kirim file `.tgs` untuk Upload Emoji Set.")
+            return
+        file = await document.get_file()
+        tgs_file = BytesIO(await file.download_as_bytearray())
+        tgs_file.seek(0)
         await update.message.reply_sticker(sticker=tgs_file)
+
         if IS_PREMIUM:
             try:
                 link = await create_user_sticker_set(update, context, tgs_file)
                 await update.message.reply_text(
                     f"🎉 Kaboom! I've just published your emoji set.\nHere's your link: {link}\n"
-                    "You can share it with other Telegram users — they'll be able to add your emoji to their emoji panel!"
+                    "Share this link — other Telegram users can add your emoji!"
                 )
             except Exception as e:
                 await update.message.reply_text(f"❌ Gagal upload emoji set: {e}")
         else:
             await update.message.reply_text(
-                "⚠️ Bot tidak premium. Sticker TGS sudah dikirim, tapi *link shareable custom emoji* tidak tersedia.\n"
+                "⚠️ Bot tidak premium. Sticker TGS sudah dikirim, tapi link shareable tidak tersedia.\n"
                 "Upgrade bot ke premium untuk fitur link."
             )
 
@@ -174,7 +185,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📌 Silakan kirim file `.json` untuk Auto Compress.")
     elif data == "menu_upload":
         context.user_data["mode"] = "upload"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk Upload Emoji Set.")
+        await query.edit_message_text("📌 Silakan kirim file `.tgs` untuk Upload Emoji Set.")
 
 # =========================================================
 # Main
@@ -183,7 +194,7 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_json_file))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
     app.add_handler(CallbackQueryHandler(button))
     app.run_polling()
 
