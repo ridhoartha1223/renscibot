@@ -132,7 +132,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+   async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
     if not document.file_name.endswith(".json"):
         await update.message.reply_text("❌ Tolong kirim file dengan format `.json`.")
@@ -284,3 +284,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
