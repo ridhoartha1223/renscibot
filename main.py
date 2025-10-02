@@ -4,6 +4,7 @@ import gzip
 from io import BytesIO
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+import random
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -21,8 +22,9 @@ def json_to_tgs(json_bytes: bytes) -> BytesIO:
 
 def optimize_json_level(json_bytes: bytes, level_percent: int) -> BytesIO:
     """
-    Optimasi JSON dengan menghapus data yang tidak penting.
-    Level 25/50/75/100 menentukan seberapa agresif optimasi.
+    Optimasi JSON dengan menghapus data non-esensial.
+    Level 25/50/75/100 menentukan agresivitas optimasi.
+    Tidak menghapus keyframe (k) dan ks untuk menghindari Unknown Track.
     """
     data = json.loads(json_bytes.decode("utf-8"))
 
@@ -30,40 +32,19 @@ def optimize_json_level(json_bytes: bytes, level_percent: int) -> BytesIO:
         if isinstance(obj, dict):
             new_obj = {}
             for k, v in obj.items():
-                # Jangan hapus key penting
-                if k in ["layers", "assets", "fr", "op", "ip", "nm", "ks"]:
+                if k in ["layers", "assets", "fr", "op", "ip", "nm", "ks", "k"]:
                     new_obj[k] = clean(v, level)
                     continue
-                # Hapus key non-esensial berdasarkan level
-                if level >= 25 and k in ["a", "hd", "cl", "ln", "tt", "ix", "bm", "mn", "ddd"]:
-                    continue
+                if k in ["hd", "a", "bm", "mn", "ix", "cl", "ln", "tt"]:
+                    if level >= 25:
+                        continue
                 new_obj[k] = clean(v, level)
             return new_obj
         elif isinstance(obj, list):
-            new_list = []
-            for item in obj:
-                # Kurangi item dalam list untuk level tinggi
-                if isinstance(item, dict) and level >= 50 and len(obj) > 3:
-                    if random_chance(level):
-                        continue
-                new_list.append(clean(item, level))
-            return new_list
+            return [clean(item, level) for item in obj]
         elif isinstance(obj, float):
             return round(obj, 3)
         return obj
-
-    def random_chance(level):
-        # Probabilitas penghapusan sesuai level
-        import random
-        if level == 25:
-            return random.random() < 0.1
-        elif level == 50:
-            return random.random() < 0.25
-        elif level == 75:
-            return random.random() < 0.5
-        elif level == 100:
-            return random.random() < 0.75
-        return False
 
     cleaned = clean(data, level_percent)
     compact = json.dumps(cleaned, separators=(",", ":")).encode("utf-8")
@@ -109,7 +90,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("ℹ️ Bantuan", callback_data="help")]
     ]
     await update.message.reply_text(
-        "👋 Hai! Aku bot untuk mengubah file JSON menjadi TGS (Telegram Sticker).\n\n"
+        "👋 Hai! Aku bot untuk mengubah file JSON menjadi emoji Telegram.\n\n"
         "Klik tombol di bawah untuk mulai!",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -157,7 +138,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "   • Normal → Konversi standar\n"
             "   • Optimize → Optimasi JSON (lebih kecil)\n"
             "3. Jika pilih Optimize, pilih level % optimasi.\n"
-            "4. Terima hasil `.tgs` siap pakai sebagai stiker Telegram."
+            "4. Terima hasil `.tgs` sebagai emoji Telegram."
         )
         keyboard = [[InlineKeyboardButton("🔙 Kembali ke Menu Utama", callback_data="main")]]
         await query.edit_message_text(help_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -205,11 +186,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tgs_file = json_to_tgs(json_bytes)
         size_kb = len(tgs_file.getvalue()) / 1024
         keyframes = count_keyframes(json_bytes)
+        mode = "Normal"
 
-        sticker_msg = await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
-        context.user_data["last_messages"].append(sticker_msg)
+        if size_kb > 64:
+            info_msg = await query.message.reply_text(
+                f"⚠️ Ukuran emoji terlalu besar ({size_kb:.2f} KB). "
+                "Silakan pilih optimize atau potong animasi.",
+                parse_mode="Markdown"
+            )
+            context.user_data["last_messages"].append(info_msg)
+        else:
+            emoji_msg = await query.message.reply_sticker(
+                sticker=InputFile(tgs_file, filename="emoji.tgs")
+            )
+            context.user_data["last_messages"].append(emoji_msg)
 
-        # Inline tetap muncul
         keyboard = [
             [
                 InlineKeyboardButton("🎨 Normal", callback_data="normal"),
@@ -218,7 +209,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("❌ Batal", callback_data="reset")]
         ]
         info_msg = await query.message.reply_text(
-            f"✅ Mode: *Normal*\n📦 Size: {size_kb:.2f} KB\n🔑 Keyframes: {keyframes}",
+            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB\n🔑 Keyframes: {keyframes}",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -259,17 +250,27 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Pilih metode konversi:", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    # ------------------- Pilih level optimize -------------------
+    # Pilih level optimize
     if query.data.startswith("level_"):
         level_percent = int(query.data.split("_")[1])
         tgs_file = optimize_json_level(json_bytes, level_percent)
         size_kb = len(tgs_file.getvalue()) / 1024
         keyframes = count_keyframes(json_bytes)
+        mode = "Optimize"
 
-        sticker_msg = await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
-        context.user_data["last_messages"].append(sticker_msg)
+        if size_kb > 64:
+            info_msg = await query.message.reply_text(
+                f"⚠️ Ukuran emoji terlalu besar ({size_kb:.2f} KB). "
+                "Silakan pilih level optimize lebih tinggi atau potong animasi.",
+                parse_mode="Markdown"
+            )
+            context.user_data["last_messages"].append(info_msg)
+        else:
+            emoji_msg = await query.message.reply_sticker(
+                sticker=InputFile(tgs_file, filename="emoji.tgs")
+            )
+            context.user_data["last_messages"].append(emoji_msg)
 
-        # Inline kembali ke Normal / Optimize
         keyboard = [
             [
                 InlineKeyboardButton("🎨 Normal", callback_data="normal"),
@@ -278,7 +279,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("❌ Batal", callback_data="reset")]
         ]
         info_msg = await query.message.reply_text(
-            f"✅ Mode: *Optimize*\n📦 Size: {size_kb:.2f} KB\n🔑 Keyframes: {keyframes}\n🎚️ Level: {level_percent}%",
+            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB\n🔑 Keyframes: {keyframes}\n🎚️ Level: {level_percent}%",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
