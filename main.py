@@ -117,17 +117,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["json_bytes"] = json_bytes
 
     preview = extract_json_info(json_bytes)
-
-    modern_text = (
-        "✨ *Siap Mengubah JSON-mu Menjadi Emoji!* ✨\n\n"
-        "📤 Kirim file `.json` animasi Lottie di bawah ini.\n"
-        "Bot akan memberikan preview dan pilihan mode konversi.\n\n"
-        "🎨 Setelah kirim, pilih:\n"
-        "  • Normal → konversi langsung\n"
-        "  • Optimize → optimasi ukuran"
-    )
-
-    keyboard = [
+keyboard = [
         [
             InlineKeyboardButton("🎨 Normal", callback_data="normal"),
             InlineKeyboardButton("⚡ Optimize", callback_data="optimize")
@@ -170,11 +160,14 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     elif query.data == "send_json":
-        await query.edit_message_text(
-            "📤 *Silakan kirim file `.json` animasi Lottie untuk dikonversi!*",
-            parse_mode="Markdown"
-        )
-        return
+    await query.edit_message_text(
+        "✨ *Siap Mengubah JSON-mu Menjadi Emoji!* ✨\n\n"
+        "📤 Kirim file JSON animasi Lottie di bawah ini. \n"
+        "Bot akan memberikan preview dan pilihan mode convert.",
+        parse_mode="Markdown"
+    )
+    return
+
 
     if query.data == "reset":
         context.user_data.clear()
@@ -301,3 +294,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
