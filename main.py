@@ -2,13 +2,19 @@ import os
 import json
 import gzip
 import random
+import re
 from io import BytesIO
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputSticker
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, ConversationHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")  # @username bot
 IS_PREMIUM = os.getenv("BOT_PREMIUM", "false").lower() == "true"
+
+# =========================================================
+# States untuk ConversationHandler
+# =========================================================
+ASK_PACK_NAME, ASK_TGS_FILE = range(2)
 
 # =========================================================
 # Helper: JSON -> gzip TGS
@@ -73,13 +79,11 @@ def random_suffix(n=6):
 # =========================================================
 # Telegram Sticker Set (PTB v23+)
 # =========================================================
-async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_TYPE, tgs_file: BytesIO):
+async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_TYPE, tgs_file: BytesIO, set_name: str, title: str):
     user = update.effective_user
     bot = context.bot
-    set_name = f"user{user.id}_emoji_{random_suffix()}_by_{BOT_USERNAME.strip('@')}"
-    title = f"{user.first_name}'s Emoji Set"
 
-    tgs_file.seek(0)  # pastikan pointer di awal
+    tgs_file.seek(0)
     sticker = InputSticker(sticker=tgs_file, emoji_list=["😀"], format="animated")
     stickers = [sticker]
 
@@ -116,7 +120,57 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "menu_convert":
+        context.user_data["mode"] = "convert"
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk Convert.")
+    elif data == "menu_autocompress":
+        context.user_data["mode"] = "autocompress"
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk Auto Compress.")
+    elif data == "menu_upload":
+        if not IS_PREMIUM:
+            await query.edit_message_text("⚠️ Bot tidak premium. Upgrade untuk fitur upload emoji set dengan link shareable.")
+            return
+        context.user_data["mode"] = "upload"
+        await query.edit_message_text("📌 Silakan masukkan *nama pack/sticker set* untuk link custom:")
+        return ASK_PACK_NAME
+
+# ===================== ConversationHandler untuk upload =====================
+async def ask_pack_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().lower()
+    # validasi nama: hanya huruf, angka, underscore, max 64
+    if not re.match(r"^[a-z0-9_]{1,64}$", text):
+        await update.message.reply_text("❌ Nama pack tidak valid. Gunakan huruf kecil, angka, underscore, max 64 karakter.")
+        return ASK_PACK_NAME
+    context.user_data["custom_pack_name"] = text
+    await update.message.reply_text("📌 Sekarang kirim file `.tgs` untuk sticker pack ini.")
+    return ASK_TGS_FILE
+
+async def receive_tgs_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    document = update.message.document
+    if not document.file_name.lower().endswith(".tgs"):
+        await update.message.reply_text("❌ Tolong kirim file `.tgs`.")
+        return ASK_TGS_FILE
+    file = await document.get_file()
+    tgs_file = BytesIO(await file.download_as_bytearray())
+    tgs_file.seek(0)
+
+    pack_name = context.user_data["custom_pack_name"]
+    title = f"{update.effective_user.first_name}'s Emoji Set"
+
+    try:
+        link = await create_user_sticker_set(update, context, tgs_file, pack_name, title)
+        await update.message.reply_text(f"🎉 Kaboom! Emoji set berhasil dibuat.\nLink shareable: {link}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Gagal upload emoji set: {e}")
+
+    return ConversationHandler.END
+
+# ===================== Handler untuk JSON (.json) =====================
+async def handle_json_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
     if not mode:
         return
@@ -124,7 +178,6 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
     file_name = document.file_name.lower()
 
-    # ===================== JSON flow =====================
     if mode in ["convert", "autocompress"]:
         if not file_name.endswith(".json"):
             await update.message.reply_text("❌ Tolong kirim file `.json`.")
@@ -143,59 +196,32 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "✅ File JSON diterima! Pilih metode:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
-        else:  # autocompress
+        else:
             tgs_file, method, size_kb = auto_compress(json_bytes)
             await update.message.reply_sticker(sticker=tgs_file)
             await update.message.reply_text(f"✅ Mode: *{method}*\n📦 Size: {size_kb:.2f} KB", parse_mode="Markdown")
-
-    # ===================== TGS flow =====================
-    elif mode == "upload":
-        if not file_name.endswith(".tgs"):
-            await update.message.reply_text("❌ Tolong kirim file `.tgs` untuk Upload Emoji Set.")
-            return
-        file = await document.get_file()
-        tgs_file = BytesIO(await file.download_as_bytearray())
-        tgs_file.seek(0)
-        await update.message.reply_sticker(sticker=tgs_file)
-
-        if IS_PREMIUM:
-            try:
-                link = await create_user_sticker_set(update, context, tgs_file)
-                await update.message.reply_text(
-                    f"🎉 Kaboom! I've just published your emoji set.\nHere's your link: {link}\n"
-                    "Share this link — other Telegram users can add your emoji!"
-                )
-            except Exception as e:
-                await update.message.reply_text(f"❌ Gagal upload emoji set: {e}")
-        else:
-            await update.message.reply_text(
-                "⚠️ Bot tidak premium. Sticker TGS sudah dikirim, tapi link shareable tidak tersedia.\n"
-                "Upgrade bot ke premium untuk fitur link."
-            )
-
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    if data == "menu_convert":
-        context.user_data["mode"] = "convert"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk Convert.")
-    elif data == "menu_autocompress":
-        context.user_data["mode"] = "autocompress"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk Auto Compress.")
-    elif data == "menu_upload":
-        context.user_data["mode"] = "upload"
-        await query.edit_message_text("📌 Silakan kirim file `.tgs` untuk Upload Emoji Set.")
 
 # =========================================================
 # Main
 # =========================================================
 def main():
     app = Application.builder().token(TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(button, pattern="^menu_upload$")],
+        states={
+            ASK_PACK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_pack_name)],
+            ASK_TGS_FILE: [MessageHandler(filters.Document.ALL, receive_tgs_file)],
+        },
+        fallbacks=[]
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_json_file))
     app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(conv_handler)
+
     app.run_polling()
 
 if __name__ == "__main__":
