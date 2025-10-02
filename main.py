@@ -1,6 +1,4 @@
 import os
-import json
-import gzip
 import random
 import re
 from io import BytesIO
@@ -17,23 +15,12 @@ IS_PREMIUM = os.getenv("BOT_PREMIUM", "false").lower() == "true"
 ASK_TGS_FILE, ASK_PACK_NAME, ASK_EMOJI = range(3)
 
 # =========================================================
-# Helper: gzip JSON -> TGS
+# Helper
 # =========================================================
-def gzip_bytes(data: bytes) -> BytesIO:
-    out = BytesIO()
-    with gzip.GzipFile(fileobj=out, mode="w") as f:
-        f.write(data)
-    out.seek(0)
-    out.name = "emoji.tgs"
-    return out
-
 def random_suffix(n=6):
     import string
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
-# =========================================================
-# Telegram Sticker Set Creation
-# =========================================================
 async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_TYPE, tgs_file: BytesIO, set_name: str, title: str, emoji_char: str):
     user = update.effective_user
     bot = context.bot
@@ -42,7 +29,6 @@ async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_
     sticker = InputSticker(sticker=tgs_file, emoji_list=[emoji_char], format="animated")
     stickers = [sticker]
 
-    # Auto-suffix jika nama sudah dipakai
     original_name = set_name
     attempt = 0
     while True:
@@ -104,6 +90,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===================== Upload Emoji Set Flow =====================
 async def receive_tgs_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("mode") != "upload":
+        await update.message.reply_text("⚠️ Klik menu *Upload Emoji Set* dulu sebelum kirim file `.tgs`.", parse_mode="Markdown")
+        return ConversationHandler.END
+
     document = update.message.document
     if not document.file_name.lower().endswith(".tgs"):
         await update.message.reply_text("❌ Tolong kirim file `.tgs`.")
@@ -114,7 +104,9 @@ async def receive_tgs_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgs_file.seek(0)
     context.user_data["tgs_file"] = tgs_file
 
-    await update.message.reply_text("📌 Sekarang masukkan nama pack / sticker set (akan jadi link custom, gunakan huruf kecil, angka, underscore, max 64 karakter).")
+    await update.message.reply_text(
+        "📌 Sekarang masukkan nama pack / sticker set (akan jadi link custom, gunakan huruf kecil, angka, underscore, max 64 karakter)."
+    )
     return ASK_PACK_NAME
 
 async def ask_pack_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144,6 +136,7 @@ async def ask_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Gagal upload emoji set: {e}")
 
+    context.user_data.clear()
     return ConversationHandler.END
 
 # ===================== JSON Handlers =====================
@@ -157,9 +150,6 @@ async def handle_json_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not file_name.endswith(".json"):
             await update.message.reply_text("❌ Tolong kirim file `.json`.")
             return
-        file = await document.get_file()
-        json_bytes = await file.download_as_bytearray()
-        context.user_data["json_bytes"] = json_bytes
         await update.message.reply_text("✅ File JSON diterima! Pilih metode convert di menu selanjutnya.")
 
 # =========================================================
@@ -171,7 +161,7 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(button, pattern="^menu_upload$")],
         states={
-            ASK_TGS_FILE: [MessageHandler(filters.Document.ALL, receive_tgs_file)],
+            ASK_TGS_FILE: [MessageHandler(filters.Document.FileExtension("tgs"), receive_tgs_file)],
             ASK_PACK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_pack_name)],
             ASK_EMOJI: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_emoji)],
         },
