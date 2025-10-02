@@ -102,4 +102,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ========= Main =========
 def main():
     token = os.getenv("BOT_TOKEN")  # set di Railway sebagai env var
-    app = Appl
+    app = Application.builder().token(token).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.Document.FileExtension("json"), handle_json))
+    app.add_handler(CallbackQueryHandler(button_callback))
+
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
