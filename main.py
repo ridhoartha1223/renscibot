@@ -53,7 +53,7 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
-def auto_compress(json_bytes: bytes) -> (BytesIO, str, float):
+def auto_compress(json_bytes: bytes):
     methods = [
         ("Normal", json_to_tgs),
         ("Optimized Safe", optimize_json_to_tgs),
@@ -69,9 +69,9 @@ def auto_compress(json_bytes: bytes) -> (BytesIO, str, float):
 # =========================================================
 # AI Assistant
 # =========================================================
-async def ai_request_edit(prompt: str, image_bytes: bytes) -> BytesIO:
+def call_openai_image_edit(prompt: str, image_bytes: bytes) -> BytesIO:
     """
-    Kirim request ke OpenAI Image API untuk edit gambar.
+    Panggil OpenAI Image API (DALL·E edit) untuk edit gambar.
     """
     url = "https://api.openai.com/v1/images/edits"
     files = {
@@ -79,8 +79,16 @@ async def ai_request_edit(prompt: str, image_bytes: bytes) -> BytesIO:
         "prompt": (None, prompt)
     }
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+
     resp = requests.post(url, headers=headers, files=files)
-    data = resp.json()
+    try:
+        data = resp.json()
+    except Exception:
+        raise Exception(f"OpenAI response error: {resp.text}")
+
+    if "data" not in data:
+        raise Exception(f"OpenAI response tidak ada 'data': {data}")
+
     img_base64 = data["data"][0]["b64_json"]
     img_bytes = base64.b64decode(img_base64)
     out = BytesIO(img_bytes)
@@ -91,11 +99,7 @@ async def ai_request_edit(prompt: str, image_bytes: bytes) -> BytesIO:
 # Handlers
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = (
-        "👋 Selamat datang di *Emoji Converter Bot*\n\n"
-        "Aku bisa mengubah file **JSON (AE/Bodymovin)** jadi animasi **TGS**.\n\n"
-        "📌 Gunakan /menu untuk membuka dashboard."
-    )
+    msg = "👋 Selamat datang di *Emoji Converter Bot*\nGunakan /menu untuk membuka dashboard."
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -105,20 +109,19 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🎭 AI Assistant", callback_data="menu_ai")],
     ]
     await update.message.reply_text(
-        "📋 *Dashboard Emoji Bot*\nPilih menu yang kamu mau:",
+        "📋 *Dashboard Emoji Bot*\nPilih menu:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# Handler untuk JSON (Convert / Auto Compress)
 async def handle_json_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
     if mode not in ["convert", "autocompress"]:
-        return  # skip kalau bukan mode JSON
+        return
 
     document = update.message.document
     if not document.file_name.endswith(".json"):
-        await update.message.reply_text("❌ Tolong kirim file dengan format `.json`.")
+        await update.message.reply_text("❌ Tolong kirim file `.json`.")
         return
 
     file = await document.get_file()
@@ -132,7 +135,7 @@ async def handle_json_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")],
         ]
         await update.message.reply_text(
-            "✅ File JSON diterima!\nPilih metode konversi:",
+            "✅ File JSON diterima! Pilih metode:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     elif mode == "autocompress":
@@ -140,18 +143,16 @@ async def handle_json_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_sticker(sticker=tgs_file)
         await update.message.reply_text(f"✅ Mode: *{method}*\n📦 Size: {size_kb:.2f} KB", parse_mode="Markdown")
 
-# Handler untuk AI Assistant
 async def handle_ai_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("mode") != "ai":
         return
 
     if not update.message.caption:
-        await update.message.reply_text("❌ Tambahkan instruksi edit di *caption* gambar!")
+        await update.message.reply_text("❌ Tambahkan instruksi edit di caption!")
         return
 
     prompt = update.message.caption
 
-    # ambil file image
     if update.message.photo:
         file = await update.message.photo[-1].get_file()
     elif update.message.document and update.message.document.file_name.lower().endswith((".png", ".jpg", ".jpeg")):
@@ -161,20 +162,18 @@ async def handle_ai_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     image_bytes = await file.download_as_bytearray()
-    loading = await update.message.reply_text("⏳ AI sedang memproses edit...")
+    loading = await update.message.reply_text("⏳ Memproses AI...")
 
     try:
-        result_img = await ai_request_edit(prompt, image_bytes)
-        # otomatis convert hasil AI ke TGS
+        result_img = call_openai_image_edit(prompt, image_bytes)
         tgs_file = gzip_bytes(result_img.getvalue())
         await loading.delete()
         await update.message.reply_sticker(sticker=tgs_file)
-        await update.message.reply_photo(result_img, caption=f"✅ Hasil AI Edit + TGS: {prompt}")
+        await update.message.reply_photo(result_img, caption=f"✅ Hasil AI + TGS: {prompt}")
     except Exception as e:
         await loading.delete()
         await update.message.reply_text(f"❌ Gagal proses AI: {str(e)}")
 
-# Callback handler untuk dashboard / tombol
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -191,7 +190,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "menu_ai":
         context.user_data["mode"] = "ai"
         await query.edit_message_text(
-            "🎭 *AI Assistant Mode*\n📌 Kirim gambar/emoji + instruksi edit di caption.",
+            "🎭 *AI Assistant Mode*\n📌 Kirim gambar/emoji + caption instruksi edit.",
             parse_mode="Markdown"
         )
         return
@@ -218,7 +217,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         size_kb = len(tgs_file.getvalue()) / 1024
         await loading.delete()
         await query.message.reply_sticker(sticker=tgs_file)
-        await query.message.reply_text(f"✅ Mode: *{mode_name}*\n📦 Size: {size_kb:.2f} KB", parse_mode="Markdown")
+        await update.message.reply_text(f"✅ Mode: *{mode_name}*\n📦 Size: {size_kb:.2f} KB", parse_mode="Markdown")
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
 
