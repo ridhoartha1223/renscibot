@@ -55,6 +55,29 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
     return gzip_bytes(compact)
 
 # =========================================================
+# Compress JSON (standalone, output JSON kecil)
+# =========================================================
+def compress_json_bytes(json_bytes: bytes) -> BytesIO:
+    """Compress JSON tanpa convert ke TGS"""
+    data = json.loads(json_bytes.decode("utf-8"))
+
+    def round_numbers(obj):
+        if isinstance(obj, dict):
+            return {k: round_numbers(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [round_numbers(v) for v in obj]
+        elif isinstance(obj, float):
+            return round(v, 3)
+        return obj
+
+    data = round_numbers(data)
+    compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
+    out = BytesIO(compact)
+    out.name = "compressed.json"
+    out.seek(0)
+    return out
+
+# =========================================================
 # Auto Compress Helper
 # =========================================================
 def auto_compress(json_bytes: bytes) -> (BytesIO, str, float):
@@ -87,8 +110,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🎨 Convert JSON", callback_data="menu_convert")],
-        [InlineKeyboardButton("⚡ Auto Compress", callback_data="menu_autocompress")],
+        [InlineKeyboardButton("🎨 Convert JSON → TGS", callback_data="menu_convert")],
+        [InlineKeyboardButton("⚡ Auto Compress → TGS <64KB", callback_data="menu_autocompress")],
+        [InlineKeyboardButton("🗜 Compress JSON → JSON kecil", callback_data="menu_compress_json")],
         [InlineKeyboardButton("❌ Reset / Cancel", callback_data="menu_reset")]
     ]
     await update.message.reply_text(
@@ -107,7 +131,6 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     json_bytes = await file.download_as_bytearray()
     context.user_data["json_bytes"] = json_bytes
 
-    # cek mode yang dipilih user
     mode_selected = context.user_data.get("mode", "manual")
 
     if mode_selected == "convert":
@@ -118,7 +141,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("❌ Batal", callback_data="menu_reset")]
         ]
         await update.message.reply_text(
-            "✅ File JSON diterima!\nPilih metode konversi:",
+            "✅ File JSON diterima!\nPilih metode konversi TGS:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -126,10 +149,15 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tgs_file, mode, size_kb = auto_compress(json_bytes)
         await update.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
         await update.message.reply_text(
-            f"✅ Mode: *{mode}*\n"
-            f"📦 Size: {size_kb:.2f} KB",
+            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
             parse_mode="Markdown"
         )
+        del context.user_data["json_bytes"]
+
+    elif mode_selected == "compress_json":
+        compressed_file = compress_json_bytes(json_bytes)
+        await update.message.reply_document(document=InputFile(compressed_file, filename="compressed.json"))
+        await update.message.reply_text("✅ JSON berhasil dikompres!")
         del context.user_data["json_bytes"]
 
     else:
@@ -141,24 +169,26 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # Reset / Cancel
     if query.data == "menu_reset":
         context.user_data.clear()
         await query.edit_message_text("✅ Semua data direset. Mulai lagi dengan /menu.")
         return
 
-    # menu dashboard
     if query.data == "menu_convert":
         context.user_data["mode"] = "convert"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Convert*.")
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Convert → TGS*.")
         return
 
     if query.data == "menu_autocompress":
         context.user_data["mode"] = "autocompress"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Auto Compress*.")
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Auto Compress → TGS*.")
         return
 
-    # pastikan ada file json
+    if query.data == "menu_compress_json":
+        context.user_data["mode"] = "compress_json"
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Compress JSON → JSON kecil*.")
+        return
+
     if "json_bytes" not in context.user_data:
         await query.edit_message_text("❌ File JSON tidak ditemukan. Kirim ulang.")
         return
@@ -184,12 +214,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await loading.delete()
         await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
         await query.message.reply_text(
-            f"✅ Mode: *{mode}*\n"
-            f"📦 Size: {size_kb:.2f} KB",
+            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
             parse_mode="Markdown"
         )
-
-        # hapus cache
         del context.user_data["json_bytes"]
 
     except Exception as e:
