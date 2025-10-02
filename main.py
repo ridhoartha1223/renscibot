@@ -1,9 +1,14 @@
 import os
+import json
+import gzip
 import random
 import re
 from io import BytesIO
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputSticker
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, ConversationHandler
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
+    filters, ContextTypes, ConversationHandler
+)
 
 TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")  # @username bot
@@ -15,8 +20,43 @@ IS_PREMIUM = os.getenv("BOT_PREMIUM", "false").lower() == "true"
 ASK_TGS_FILE, ASK_PACK_NAME, ASK_EMOJI = range(3)
 
 # =========================================================
-# Helper
+# Helper Functions
 # =========================================================
+def gzip_bytes(data: bytes) -> BytesIO:
+    out = BytesIO()
+    with gzip.GzipFile(fileobj=out, mode="w") as f:
+        f.write(data)
+    out.seek(0)
+    out.name = "emoji.tgs"
+    return out
+
+def optimize_json(json_bytes: bytes) -> bytes:
+    data = json.loads(json_bytes.decode("utf-8"))
+    def round_numbers(obj):
+        if isinstance(obj, dict):
+            return {k: round_numbers(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [round_numbers(v) for v in obj]
+        elif isinstance(obj, float):
+            return round(obj, 3)
+        return obj
+    data = round_numbers(data)
+    return json.dumps(data, separators=(",", ":")).encode("utf-8")
+
+def reduce_keyframes_json(json_bytes: bytes) -> bytes:
+    data = json.loads(json_bytes.decode("utf-8"))
+    def simplify_keyframes(obj):
+        if isinstance(obj, dict):
+            if "k" in obj and isinstance(obj["k"], list) and len(obj["k"]) > 2:
+                obj["k"] = obj["k"][::2]
+            for v in obj.values():
+                simplify_keyframes(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                simplify_keyframes(item)
+    simplify_keyframes(data)
+    return json.dumps(data, separators=(",", ":")).encode("utf-8")
+
 def random_suffix(n=6):
     import string
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=n))
@@ -53,7 +93,7 @@ async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Selamat datang di *Emoji Converter Bot*\nGunakan /menu untuk membuka dashboard.",
+        "👋 Selamat datang di *Emoji Bot*\nGunakan /menu untuk membuka dashboard.",
         parse_mode="Markdown"
     )
 
@@ -76,7 +116,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "menu_upload":
         if not IS_PREMIUM:
-            await query.edit_message_text("⚠️ Bot tidak premium. Upgrade untuk fitur upload emoji set dengan link shareable.")
+            await query.edit_message_text("⚠️ Bot tidak premium. Upgrade untuk fitur upload emoji set.")
             return
         context.user_data["mode"] = "upload"
         await query.edit_message_text("📌 Silakan kirim file `.tgs` untuk sticker pack ini.")
@@ -105,7 +145,7 @@ async def receive_tgs_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["tgs_file"] = tgs_file
 
     await update.message.reply_text(
-        "📌 Sekarang masukkan nama pack / sticker set (akan jadi link custom, gunakan huruf kecil, angka, underscore, max 64 karakter)."
+        "📌 Masukkan nama pack / sticker set (huruf kecil, angka, underscore, max 64 karakter)."
     )
     return ASK_PACK_NAME
 
@@ -115,8 +155,7 @@ async def ask_pack_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Nama pack tidak valid. Gunakan huruf kecil, angka, underscore, max 64 karakter.")
         return ASK_PACK_NAME
     context.user_data["custom_pack_name"] = text
-
-    await update.message.reply_text("📌 Sekarang pilih emoji untuk sticker ini (misal: 😀).")
+    await update.message.reply_text("📌 Pilih emoji untuk sticker ini (misal: 😀).")
     return ASK_EMOJI
 
 async def ask_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,18 +178,35 @@ async def ask_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ===================== JSON Handlers =====================
+# ===================== JSON Convert / Auto Compress =====================
 async def handle_json_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
     if not mode:
         return
     document = update.message.document
-    file_name = document.file_name.lower()
-    if mode in ["convert", "autocompress"]:
-        if not file_name.endswith(".json"):
-            await update.message.reply_text("❌ Tolong kirim file `.json`.")
-            return
-        await update.message.reply_text("✅ File JSON diterima! Pilih metode convert di menu selanjutnya.")
+    if not document.file_name.lower().endswith(".json"):
+        await update.message.reply_text("❌ Tolong kirim file `.json`.")
+        return
+
+    file = await document.get_file()
+    json_bytes = await file.download_as_bytearray()
+
+    if mode == "convert":
+        tgs_file = gzip_bytes(json_bytes)
+        mode_text = "Normal Convert"
+    elif mode == "autocompress":
+        optimized = optimize_json(json_bytes)
+        tgs_file = gzip_bytes(optimized)
+        mode_text = "Optimized / Auto Compress"
+    else:
+        return
+
+    size_kb = len(tgs_file.getvalue()) / 1024
+    indicator = "🟢" if size_kb <= 64 else "🔴"
+    note = "Ukuran aman" if size_kb <= 64 else "File besar, bisa reduce keyframes"
+
+    await update.message.reply_sticker(sticker=tgs_file)
+    await update.message.reply_text(f"✅ {mode_text} selesai!\n📦 Size: {size_kb:.2f} KB\n{indicator} {note}")
 
 # =========================================================
 # Main
@@ -161,7 +217,7 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(button, pattern="^menu_upload$")],
         states={
-            ASK_TGS_FILE: [MessageHandler(filters.Document.FileExtension("tgs"), receive_tgs_file)],
+            ASK_TGS_FILE: [MessageHandler(filters.Document.ALL, receive_tgs_file)],
             ASK_PACK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_pack_name)],
             ASK_EMOJI: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_emoji)],
         },
