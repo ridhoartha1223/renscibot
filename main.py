@@ -132,8 +132,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
-async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
     if not document.file_name.endswith(".json"):
         await update.message.reply_text("❌ Tolong kirim file dengan format `.json`.")
@@ -190,7 +189,87 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data["last_bot_msg"])
         except:
             pass
-                    del context.user_data["json_bytes"]
+
+    if query.data == "menu_reset":
+        context.user_data.clear()
+        await query.edit_message_text("✅ Semua data direset. Mulai lagi dengan /menu.")
+        return
+
+    if query.data == "menu_convert":
+        context.user_data["mode"] = "convert"
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Convert → TGS*.")
+        return
+
+    if query.data == "menu_compress_json":
+        context.user_data["mode"] = "compress_json"
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Compress JSON → JSON kecil*.")
+        return
+
+    if query.data == "menu_emoji_gen":
+        context.user_data["mode"] = "emoji_gen"
+        await query.edit_message_text("📌 Kirim file `.json` untuk *Emoji Generator*.")
+        return
+
+    if query.data in ["effect_pop", "effect_flash", "effect_rainbow", "effect_shake"]:
+        effect = query.data.replace("effect_", "")
+        json_bytes = context.user_data.get("json_bytes")
+        if not json_bytes:
+            await query.edit_message_text("❌ File JSON tidak ditemukan.")
+            return
+        loading = await query.message.reply_text("⏳ Membuat emoji dengan efek...")
+        tgs_file = generate_emoji_with_effect(json_bytes, effect)
+        await loading.delete()
+        await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
+        await query.message.reply_text(f"✅ Efek *{effect.capitalize()}* berhasil diterapkan!", parse_mode="Markdown")
+        del context.user_data["json_bytes"]
+        return
+
+    if "json_bytes" not in context.user_data:
+        await query.edit_message_text("❌ File JSON tidak ditemukan. Kirim ulang.")
+        return
+
+    json_bytes = context.user_data["json_bytes"]
+
+    try:
+        loading = await query.message.reply_text("⏳ Sedang memproses...")
+
+        if query.data == "normal":
+            tgs_file = json_to_tgs(json_bytes)
+            mode = "Normal"
+        elif query.data == "optimize":
+            tgs_file = optimize_json_to_tgs(json_bytes)
+            mode = "Optimized Safe"
+        elif query.data == "reduce":
+            tgs_file = reduce_keyframes_json(json_bytes)
+            mode = "Reduce Keyframes"
+        else:
+            return
+
+        await loading.delete()
+
+        size_kb = len(tgs_file.getvalue()) / 1024
+        keyframes = count_keyframes(json_bytes)
+
+        await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
+        result_msg = await query.message.reply_text(
+            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
+            parse_mode="Markdown"
+        )
+        context.user_data["last_bot_msg"] = result_msg.message_id
+
+        if size_kb > 64 and keyframes > 100:
+            warning = (
+                f"⚠️ File terlalu besar ({size_kb:.2f} KB) dan punya banyak keyframe ({keyframes}).\n"
+                "Pilih metode untuk mengurangi ukuran:"
+            )
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔧 Compress", callback_data="optimize")],
+                [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")]
+            ])
+            warn_msg = await query.message.reply_text(warning, reply_markup=keyboard)
+            context.user_data["last_bot_msg"] = warn_msg.message_id
+
+        del context.user_data["json_bytes"]
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
