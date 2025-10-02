@@ -116,5 +116,6 @@ def main() -> None:
 
     logger.info(f"Bot berjalan dengan Webhook di URL: {full_webhook_url}")
 
-if name == "__main__":
+if __name__ == "__main__":
     main()
+
