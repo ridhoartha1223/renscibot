@@ -2,7 +2,7 @@ import os
 import json
 import gzip
 from io import BytesIO
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -30,7 +30,7 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
         elif isinstance(obj, list):
             return [round_numbers(v) for v in obj]
         elif isinstance(obj, float):
-            return round(obj, 3)
+            return round(v, 3)
         return obj
 
     data = round_numbers(data)
@@ -72,7 +72,7 @@ def auto_compress(json_bytes: bytes) -> (BytesIO, str, float):
             return tgs_file, name, size_kb
 
     # fallback: hasil terakhir
-    return tgs_file, name, size_kb
+    return tgs_file, name + " (⚠️ >64KB)", size_kb
 
 # =========================================================
 # Handlers
@@ -89,6 +89,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🎨 Convert JSON", callback_data="menu_convert")],
         [InlineKeyboardButton("⚡ Auto Compress", callback_data="menu_autocompress")],
+        [InlineKeyboardButton("❌ Reset / Cancel", callback_data="menu_reset")]
     ]
     await update.message.reply_text(
         "📋 *Dashboard Emoji Bot*\nPilih menu yang kamu mau:",
@@ -113,7 +114,8 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("🎨 Normal", callback_data="normal")],
             [InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
-            [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")]
+            [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")],
+            [InlineKeyboardButton("❌ Batal", callback_data="menu_reset")]
         ]
         await update.message.reply_text(
             "✅ File JSON diterima!\nPilih metode konversi:",
@@ -121,14 +123,15 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif mode_selected == "autocompress":
-        # langsung auto compress
         tgs_file, mode, size_kb = auto_compress(json_bytes)
-        await update.message.reply_sticker(sticker=tgs_file)
+        await update.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
         await update.message.reply_text(
             f"✅ Mode: *{mode}*\n"
             f"📦 Size: {size_kb:.2f} KB",
             parse_mode="Markdown"
         )
+        del context.user_data["json_bytes"]
+
     else:
         await update.message.reply_text(
             "✅ File JSON diterima!\nGunakan tombol untuk memilih mode konversi."
@@ -137,6 +140,12 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    # Reset / Cancel
+    if query.data == "menu_reset":
+        context.user_data.clear()
+        await query.edit_message_text("✅ Semua data direset. Mulai lagi dengan /menu.")
+        return
 
     # menu dashboard
     if query.data == "menu_convert":
@@ -162,25 +171,26 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if query.data == "normal":
             tgs_file = json_to_tgs(json_bytes)
             mode = "Normal"
-            size_kb = len(tgs_file.getvalue()) / 1024
         elif query.data == "optimize":
             tgs_file = optimize_json_to_tgs(json_bytes)
             mode = "Optimized Safe"
-            size_kb = len(tgs_file.getvalue()) / 1024
         elif query.data == "reduce":
             tgs_file = reduce_keyframes_json(json_bytes)
             mode = "Reduce Keyframes"
-            size_kb = len(tgs_file.getvalue()) / 1024
         else:
             return
 
+        size_kb = len(tgs_file.getvalue()) / 1024
         await loading.delete()
-        await query.message.reply_sticker(sticker=tgs_file)
+        await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
         await query.message.reply_text(
             f"✅ Mode: *{mode}*\n"
             f"📦 Size: {size_kb:.2f} KB",
             parse_mode="Markdown"
         )
+
+        # hapus cache
+        del context.user_data["json_bytes"]
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
