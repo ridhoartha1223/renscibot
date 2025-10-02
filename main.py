@@ -23,7 +23,7 @@ def gzip_bytes(data_bytes: bytes) -> BytesIO:
     with gzip.GzipFile(fileobj=buf, mode="w", compresslevel=9) as f:
         f.write(data_bytes)
     buf.seek(0)
-    buf.name = "emoji.tgs"   # wajib: supaya Telegram anggap animasi
+    buf.name = "emoji.tgs"
     return buf
 
 def size_kb(buf: BytesIO) -> float:
@@ -35,40 +35,26 @@ def convert_json_to_tgs(json_bytes: bytes) -> BytesIO:
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
-def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
+def optimize_safe(json_bytes: bytes) -> BytesIO:
+    """Optimasi ringan: round angka, aman selalu animasi"""
     data = json.loads(json_bytes.decode("utf-8"))
 
-    # --- FIELD WAJIB HARUS ADA ---
+    # pastikan field wajib ada
     required = ["v", "fr", "ip", "op", "w", "h", "layers"]
     for r in required:
         if r not in data:
             raise ValueError(f"Field wajib hilang: {r}")
 
-    # meta WAJIB ada
     if "meta" not in data:
         data["meta"] = {"g": "AE", "a": "", "k": "", "d": "", "tc": ""}
 
-    # fps max 20
     try:
         if float(data.get("fr", 30)) > 20:
             data["fr"] = 20
     except:
         pass
 
-    # hanya hapus property tidak penting di dalam layers
-    def cleanup(obj):
-        if isinstance(obj, dict):
-            for k in ["nm", "mn", "cl", "bm", "hd"]:
-                obj.pop(k, None)
-            for v in obj.values():
-                cleanup(v)
-        elif isinstance(obj, list):
-            for item in obj:
-                cleanup(item)
-
-    cleanup(data["layers"])
-
-    # round angka biar kecil
+    # round angka
     def round_numbers(obj):
         if isinstance(obj, dict):
             return {k: round_numbers(v) for k, v in obj.items()}
@@ -83,6 +69,49 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
+def optimize_aggressive(json_bytes: bytes) -> BytesIO:
+    """Optimasi agresif: round angka + hapus field ringan (risiko Unknown Track)"""
+    data = json.loads(json_bytes.decode("utf-8"))
+
+    required = ["v", "fr", "ip", "op", "w", "h", "layers"]
+    for r in required:
+        if r not in data:
+            raise ValueError(f"Field wajib hilang: {r}")
+
+    if "meta" not in data:
+        data["meta"] = {"g": "AE", "a": "", "k": "", "d": "", "tc": ""}
+
+    try:
+        if float(data.get("fr", 30)) > 20:
+            data["fr"] = 20
+    except:
+        pass
+
+    def cleanup(obj):
+        if isinstance(obj, dict):
+            for k in ["mn", "cl", "bm", "hd"]:  # nm jangan dihapus
+                obj.pop(k, None)
+            for v in obj.values():
+                cleanup(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                cleanup(item)
+
+    cleanup(data["layers"])
+
+    def round_numbers(obj):
+        if isinstance(obj, dict):
+            return {k: round_numbers(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [round_numbers(v) for v in obj]
+        elif isinstance(obj, float):
+            return round(obj, 3)
+        return obj
+
+    data = round_numbers(data)
+    compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
+    return gzip_bytes(compact)
+
 def simplify_keyframes(json_bytes: bytes, step: int = 2) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
 
@@ -90,7 +119,7 @@ def simplify_keyframes(json_bytes: bytes, step: int = 2) -> BytesIO:
         if isinstance(obj, dict):
             for k, v in list(obj.items()):
                 if k == "k" and isinstance(v, list):
-                    obj[k] = v[::step]  # kurangi keyframes
+                    obj[k] = v[::step]
                 else:
                     traverse_and_reduce(v)
         elif isinstance(obj, list):
@@ -151,7 +180,8 @@ async def handle_json(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [InlineKeyboardButton("🔄 Normal", callback_data="normal")],
-        [InlineKeyboardButton("⚡ Optimized", callback_data="optimize")],
+        [InlineKeyboardButton("⚡ Optimized (Safe)", callback_data="optimize_safe")],
+        [InlineKeyboardButton("⚡ Optimized (Aggressive)", callback_data="optimize_aggressive")],
     ]
     await update.message.reply_text("Pilih mode konversi:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -167,9 +197,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if query.data == "normal":
             tgs_buf = convert_json_to_tgs(data)
             mode = "Normal"
-        elif query.data == "optimize":
-            tgs_buf = optimize_json_to_tgs(data)
-            mode = "Optimized"
+        elif query.data == "optimize_safe":
+            tgs_buf = optimize_safe(data)
+            mode = "Optimized (Safe)"
+        elif query.data == "optimize_aggressive":
+            tgs_buf = optimize_aggressive(data)
+            mode = "Optimized (Aggressive)"
         elif query.data == "reduce_keyframes":
             tgs_buf = simplify_keyframes(data, step=2)
             mode = "Reduced Keyframes"
@@ -180,8 +213,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         kb = size_kb(tgs_buf)
-
-        # kirim sebagai sticker
         await query.message.reply_sticker(sticker=InputFile(tgs_buf, filename=tgs_buf.name))
 
         if len(tgs_buf.getvalue()) <= 64 * 1024:
@@ -195,7 +226,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [
                 [InlineKeyboardButton("✂️ Kurangi Keyframes", callback_data="reduce_keyframes")],
                 [InlineKeyboardButton("⏱ Kurangi Durasi 50%", callback_data="reduce_duration")],
-                [InlineKeyboardButton("🔁 Optimized", callback_data="optimize")],
+                [InlineKeyboardButton("🔁 Optimized (Safe)", callback_data="optimize_safe")],
             ]
             await query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
