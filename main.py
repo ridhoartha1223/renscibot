@@ -3,39 +3,46 @@ from io import BytesIO
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
+
 # ===================== Fungsi Konversi =====================
 
 def convert_json_to_tgs(json_bytes):
     """Konversi JSON ke TGS tanpa optimasi."""
-    return BytesIO(json_bytes)
+    bio = BytesIO(json_bytes)
+    bio.name = "emoji.tgs"  # penting biar Telegram anggap animasi
+    return bio
 
 def optimize_json_to_tgs(json_bytes):
     """Optimasi sederhana: hapus whitespace JSON."""
     data = json.loads(json_bytes.decode("utf-8"))
     optimized = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return BytesIO(optimized)
+    bio = BytesIO(optimized)
+    bio.name = "emoji.tgs"
+    return bio
 
 def simplify_keyframes(json_bytes, step=2):
-    """Kurangi jumlah keyframes dengan cara sampling setiap 'step' frame."""
+    """Kurangi jumlah keyframes dengan sampling tiap 'step' frame."""
     data = json.loads(json_bytes.decode("utf-8"))
 
     def reduce_keys(keys):
         if isinstance(keys, list):
-            return keys[::step]  # ambil tiap 'step'
+            return keys[::step]
         return keys
 
-    # Traverse semua animasi layer
     if "layers" in data:
         for layer in data["layers"]:
-            if "ks" in layer:  # transform
+            if "ks" in layer:
                 for k in layer["ks"].values():
                     if isinstance(k, dict) and "k" in k and isinstance(k["k"], list):
                         k["k"] = reduce_keys(k["k"])
 
     optimized = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return BytesIO(optimized)
+    bio = BytesIO(optimized)
+    bio.name = "emoji.tgs"
+    return bio
 
-# ===========================================================
+
+# ===================== Handler =====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Kirim file .json untuk saya konversi jadi emoji animasi (.tgs)")
@@ -84,9 +91,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_size = len(tgs_file.getvalue())
         size_kb = round(file_size / 1024, 2)
 
-        # ✅ Kirim emoji animasi
+        # ✅ Kirim emoji animasi (.tgs)
         await query.message.reply_sticker(
-            sticker=InputFile(tgs_file, filename=f"{mode}.tgs")
+            sticker=InputFile(tgs_file, filename=tgs_file.name)
         )
 
         if file_size <= 64 * 1024:
@@ -111,6 +118,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {e}")
+
 
 # ===================== MAIN =====================
 
