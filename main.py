@@ -26,10 +26,7 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
 
     def round_numbers(obj):
         if isinstance(obj, dict):
-            new_dict = {}
-            for k, val in obj.items():
-                new_dict[k] = round_numbers(val)
-            return new_dict
+            return {k: round_numbers(v) for k, v in obj.items()}
         elif isinstance(obj, list):
             return [round_numbers(item) for item in obj]
         elif isinstance(obj, float):
@@ -57,18 +54,12 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
-# =========================================================
-# Compress JSON (standalone, output JSON kecil)
-# =========================================================
 def compress_json_bytes(json_bytes: bytes) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
 
     def round_numbers(obj):
         if isinstance(obj, dict):
-            new_dict = {}
-            for k, val in obj.items():
-                new_dict[k] = round_numbers(val)
-            return new_dict
+            return {k: round_numbers(v) for k, v in obj.items()}
         elif isinstance(obj, list):
             return [round_numbers(item) for item in obj]
         elif isinstance(obj, float):
@@ -83,6 +74,41 @@ def compress_json_bytes(json_bytes: bytes) -> BytesIO:
     return out
 
 # =========================================================
+# New Features: Preview & Suggestion
+# =========================================================
+def extract_json_info(json_bytes: bytes) -> str:
+    try:
+        data = json.loads(json_bytes.decode("utf-8"))
+        layers = len(data.get("layers", []))
+        assets = len(data.get("assets", []))
+        name = data.get("nm", "Tanpa Nama")
+        duration = data.get("op", 0) / data.get("fr", 1)
+        return (
+            f"📄 *Preview JSON*\n"
+            f"• Nama: `{name}`\n"
+            f"• Layer: `{layers}`\n"
+            f"• Asset: `{assets}`\n"
+            f"• Durasi: `{duration:.2f}` detik"
+        )
+    except Exception:
+        return "❌ Gagal membaca isi JSON."
+
+def suggest_conversion_mode(json_bytes: bytes) -> str:
+    size_kb = len(json_bytes) / 1024
+    try:
+        data = json.loads(json_bytes.decode("utf-8"))
+        keyframes = sum(
+            len(layer.get("ks", {}).get("k", []))
+            for layer in data.get("layers", [])
+            if isinstance(layer.get("ks", {}).get("k", []), list)
+        )
+        if size_kb > 100 or keyframes > 100:
+            return "⚠️ File besar atau banyak keyframe. Disarankan pakai *Reduce Keyframes*."
+        return "✅ File ringan. Mode *Normal* atau *Optimized* cocok digunakan."
+    except Exception:
+        return "ℹ️ Tidak bisa mendeteksi saran otomatis."
+
+# =========================================================
 # Handlers
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -95,12 +121,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🎨 Convert JSON → TGS", callback_data="menu_convert")],
-        [InlineKeyboardButton("🗜 Compress JSON → JSON kecil", callback_data="menu_compress_json")],
-        [InlineKeyboardButton("❌ Reset / Cancel", callback_data="menu_reset")]
+        [InlineKeyboardButton("🌘 Convert JSON → TGS", callback_data="menu_convert")],
+        [InlineKeyboardButton("🖤 Compress JSON → JSON kecil", callback_data="menu_compress_json")],
+        [InlineKeyboardButton("🧨 Reset / Cancel", callback_data="menu_reset")]
     ]
     await update.message.reply_text(
-        "📋 *Dashboard Emoji Bot*\nPilih menu yang kamu mau:",
+        "🌑 *Dark Dashboard*\nPilih aksi yang kamu mau:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -114,6 +140,11 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await document.get_file()
     json_bytes = await file.download_as_bytearray()
     context.user_data["json_bytes"] = json_bytes
+
+    preview = extract_json_info(json_bytes)
+    suggestion = suggest_conversion_mode(json_bytes)
+    await update.message.reply_text(preview, parse_mode="Markdown")
+    await update.message.reply_text(suggestion, parse_mode="Markdown")
 
     mode_selected = context.user_data.get("mode", "manual")
 
@@ -181,7 +212,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         size_kb = len(tgs_file.getvalue()) / 1024
-        await loading.delete()
+        await loading.edit_text("✅ Proses selesai!")
         await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
         await query.message.reply_text(
             f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
@@ -196,12 +227,4 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Main
 # =========================================================
 def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
-    app.add_handler(CallbackQueryHandler(button))
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    app = Application.builder().token(TOKEN).
