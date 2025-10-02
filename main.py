@@ -124,8 +124,6 @@ keyboard = [
         ],
         [InlineKeyboardButton("❌ Batal", callback_data="reset")]
     ]
-
-    await update.message.reply_text(modern_text, parse_mode="Markdown")
     await update.message.reply_text(
         preview,
         parse_mode="Markdown",
@@ -294,4 +292,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
