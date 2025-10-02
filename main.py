@@ -44,15 +44,20 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         json_path = os.path.join(tmpdir, document.file_name)
         tgs_path = os.path.join(tmpdir, "output.tgs")
 
-        # Download JSON
         await file.download_to_drive(json_path)
 
         try:
             convert_json_to_tgs(json_path, tgs_path)
 
-            # Kirim hasil .tgs
+            # 1. Preview sebagai sticker
             with open(tgs_path, "rb") as f:
-                await update.message.reply_document(f, filename="converted.tgs")
+                await update.message.reply_sticker(f)
+
+            # 2. Kirim file .tgs untuk diupload manual ke Emoji
+            with open(tgs_path, "rb") as f:
+                await update.message.reply_document(f, filename="emoji.tgs",
+                                                    caption="📂 Ini file TGS kamu.\n"
+                                                            "➡️ Upload ke menu *Emoji Kustom* di Telegram.")
 
         except Exception as e:
             await update.message.reply_text(f"❌ Gagal convert: {e}")
@@ -91,3 +96,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
