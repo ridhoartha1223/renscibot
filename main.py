@@ -4,7 +4,6 @@ import gzip
 from io import BytesIO
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-import random
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -34,7 +33,6 @@ def optimize_json_level(json_bytes: bytes, level_percent: int) -> BytesIO:
                     new_obj[k] = {}
                     for prop, val in v.items():
                         if isinstance(val, dict) and "k" in val and isinstance(val["k"], list):
-                            # Sampling keyframes sesuai level
                             step = max(1, int(100 / level))
                             new_obj[k][prop] = val.copy()
                             new_obj[k][prop]["k"] = val["k"][::step]
@@ -83,29 +81,27 @@ def extract_json_info(json_bytes: bytes) -> str:
         size_kb = len(json_bytes) / 1024
         return (
             f"📄 *Preview JSON*\n"
-            f"──────────────────\n"
+            f"─────────────────────────\n"
             f"• 🏷️ Nama: `{name}`\n"
             f"• 🎞️ Layer: `{layers}`\n"
             f"• 🗂️ Asset: `{assets}`\n"
             f"• ⏱️ Durasi: `{duration:.2f}` detik\n"
             f"• 💾 Ukuran file: `{size_kb:.2f} KB`\n"
-            f"──────────────────"
+            f"─────────────────────────"
         )
     except Exception:
         return "❌ Gagal membaca isi JSON."
 
 # -------------------- HANDLERS --------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Tampilan Start lebih keren & interaktif
     keyboard = [
         [InlineKeyboardButton("📄 Kirim JSON", callback_data="send_json")],
-        [InlineKeyboardButton("⚡ Optimize", callback_data="optimize")],
         [InlineKeyboardButton("ℹ️ Bantuan", callback_data="help")]
     ]
     await update.message.reply_text(
         "✨ *Selamat datang di Emoji Creator Bot!* ✨\n\n"
-        "Kamu bisa mengubah file JSON animasi menjadi *emoji Telegram*.\n"
-        "Klik tombol di bawah untuk mulai!",
+        "Ubah file JSON animasi menjadi *emoji Telegram* 🎉\n"
+        "Klik tombol di bawah untuk memulai!",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -122,7 +118,15 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     preview = extract_json_info(json_bytes)
 
-    # Inline keyboard setelah upload JSON
+    modern_text = (
+        "✨ *Siap Mengubah JSON-mu Menjadi Emoji!* ✨\n\n"
+        "📤 Kirim file `.json` animasi Lottie di bawah ini.\n"
+        "Bot akan memberikan preview dan pilihan mode konversi.\n\n"
+        "🎨 Setelah kirim, pilih:\n"
+        "  • Normal → konversi langsung\n"
+        "  • Optimize → optimasi ukuran"
+    )
+
     keyboard = [
         [
             InlineKeyboardButton("🎨 Normal", callback_data="normal"),
@@ -131,12 +135,10 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❌ Batal", callback_data="reset")]
     ]
 
+    await update.message.reply_text(modern_text, parse_mode="Markdown")
     await update.message.reply_text(
-        "✅ *File JSON berhasil diterima!* 🎉\n\n" + preview,
-        parse_mode="Markdown"
-    )
-    await update.message.reply_text(
-        "Pilih metode konversi:",
+        preview,
+        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -144,14 +146,13 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # Bantuan & navigasi
     if query.data == "help":
         help_text = (
             "ℹ️ *Panduan Penggunaan*\n\n"
             "1. Kirim file `.json` animasi Lottie.\n"
             "2. Pilih metode konversi:\n"
-            "   • Normal → Konversi standar\n"
-            "   • Optimize → Optimasi JSON\n"
+            "   • Normal → konversi langsung\n"
+            "   • Optimize → optimasi JSON\n"
             "3. Jika pilih Optimize, pilih level % optimasi.\n"
             "4. Terima hasil `.tgs` sebagai *emoji* Telegram."
         )
@@ -161,7 +162,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "main":
         keyboard = [
             [InlineKeyboardButton("📄 Kirim JSON", callback_data="send_json")],
-            [InlineKeyboardButton("⚡ Optimize", callback_data="optimize")],
             [InlineKeyboardButton("ℹ️ Bantuan", callback_data="help")]
         ]
         await query.edit_message_text(
@@ -176,7 +176,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Reset
     if query.data == "reset":
         context.user_data.clear()
         await query.edit_message_text("✅ Semua data direset. Kirim file baru untuk mulai lagi.")
@@ -186,9 +185,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ File JSON tidak ditemukan. Kirim ulang.")
         return
 
-    json_bytes = context.user_data["json_bytes"]
-
-    # Hapus preview lama
     for msg in context.user_data.get("last_messages", []):
         try:
             await msg.delete()
@@ -196,7 +192,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
     context.user_data["last_messages"] = []
 
-    # Normal
+    json_bytes = context.user_data["json_bytes"]
+
     if query.data == "normal":
         tgs_file = json_to_tgs(json_bytes)
         size_kb = len(tgs_file.getvalue()) / 1024
@@ -209,12 +206,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Silakan pilih optimize atau potong animasi.",
                 parse_mode="Markdown"
             )
-            context.user_data["last_messages"].append(info_msg)
+            context.user_data["last_messages"] = [info_msg]
         else:
             emoji_msg = await query.message.reply_sticker(
                 sticker=InputFile(tgs_file, filename="emoji.tgs")
             )
-            context.user_data["last_messages"].append(emoji_msg)
+            context.user_data["last_messages"] = [emoji_msg]
 
         keyboard = [
             [
@@ -229,9 +226,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         context.user_data["last_messages"].append(info_msg)
-        return
 
-    # Optimize → level %
     if query.data == "optimize":
         keyboard = [
             [
@@ -242,9 +237,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("75%", callback_data="level_75"),
                 InlineKeyboardButton("100%", callback_data="level_100")
             ],
-            [
-                InlineKeyboardButton("🔙 Kembali", callback_data="back_optimize")
-            ]
+            [InlineKeyboardButton("🔙 Kembali", callback_data="back_optimize")]
         ]
         await query.edit_message_text(
             "⚡ *Optimize JSON*\nPilih level optimasi:",
