@@ -64,25 +64,6 @@ def compress_json_bytes(json_bytes: bytes) -> BytesIO:
     out.seek(0)
     return out
 
-def apply_effect(data, effect):
-    for layer in data.get("layers", []):
-        ks = layer.get("ks", {})
-        if effect == "pop" and "s" in ks:
-            ks["s"]["k"] = [{"t":0,"s":[100,100]}, {"t":10,"s":[120,120]}, {"t":20,"s":[100,100]}]
-        elif effect == "flash" and "o" in ks:
-            ks["o"]["k"] = [{"t":0,"s":100}, {"t":5,"s":0}, {"t":10,"s":100}]
-        elif effect == "rainbow" and "c" in ks:
-            ks["c"]["k"] = [{"t":0,"s":[1,0,0,1]}, {"t":10,"s":[0,1,0,1]}, {"t":20,"s":[0,0,1,1]}]
-        elif effect == "shake" and "p" in ks:
-            ks["p"]["k"] = [{"t":0,"s":[0,0]}, {"t":5,"s":[10,-10]}, {"t":10,"s":[-10,10]}, {"t":15,"s":[0,0]}]
-    return data
-
-def generate_emoji_with_effect(json_bytes: bytes, effect: str) -> BytesIO:
-    data = json.loads(json_bytes.decode("utf-8"))
-    data = apply_effect(data, effect)
-    compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return gzip_bytes(compact)
-
 def extract_json_info(json_bytes: bytes) -> str:
     try:
         data = json.loads(json_bytes.decode("utf-8"))
@@ -123,7 +104,6 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🌘 Convert JSON → TGS", callback_data="menu_convert")],
         [InlineKeyboardButton("🖤 Compress JSON → JSON kecil", callback_data="menu_compress_json")],
-        [InlineKeyboardButton("✨ Emoji Generator", callback_data="menu_emoji_gen")],
         [InlineKeyboardButton("🧨 Reset / Cancel", callback_data="menu_reset")]
     ]
     await update.message.reply_text(
@@ -165,16 +145,6 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ JSON berhasil dikompres!")
         del context.user_data["json_bytes"]
 
-    elif mode_selected == "emoji_gen":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎨 Pop", callback_data="effect_pop")],
-            [InlineKeyboardButton("💫 Flash", callback_data="effect_flash")],
-            [InlineKeyboardButton("🌈 Rainbow", callback_data="effect_rainbow")],
-            [InlineKeyboardButton("🌀 Shake", callback_data="effect_shake")],
-            [InlineKeyboardButton("❌ Batal", callback_data="menu_reset")]
-        ])
-        await update.message.reply_text("✅ File diterima!\nPilih efek emoji:", reply_markup=keyboard)
-
     else:
         await update.message.reply_text(
             "✅ File JSON diterima!\nGunakan tombol untuk memilih mode konversi."
@@ -182,12 +152,6 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
-    if "last_bot_msg" in context.user_data:
-        try:
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data["last_bot_msg"])
-        except:
-            pass
 
     if query.data == "menu_reset":
         context.user_data.clear()
@@ -202,25 +166,6 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "menu_compress_json":
         context.user_data["mode"] = "compress_json"
         await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Compress JSON → JSON kecil*.")
-        return
-
-    if query.data == "menu_emoji_gen":
-        context.user_data["mode"] = "emoji_gen"
-        await query.edit_message_text("📌 Kirim file `.json` untuk *Emoji Generator*.")
-        return
-
-    if query.data in ["effect_pop", "effect_flash", "effect_rainbow", "effect_shake"]:
-        effect = query.data.replace("effect_", "")
-        json_bytes = context.user_data.get("json_bytes")
-        if not json_bytes:
-            await query.edit_message_text("❌ File JSON tidak ditemukan.")
-            return
-        loading = await query.message.reply_text("⏳ Membuat emoji dengan efek...")
-        tgs_file = generate_emoji_with_effect(json_bytes, effect)
-        await loading.delete()
-        await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
-        await query.message.reply_text(f"✅ Efek *{effect.capitalize()}* berhasil diterapkan!", parse_mode="Markdown")
-        del context.user_data["json_bytes"]
         return
 
     if "json_bytes" not in context.user_data:
@@ -250,23 +195,10 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyframes = count_keyframes(json_bytes)
 
         await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
-        result_msg = await query.message.reply_text(
-            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
+        await query.message.reply_text(
+            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB\n🔑 Keyframes: {keyframes}",
             parse_mode="Markdown"
         )
-        context.user_data["last_bot_msg"] = result_msg.message_id
-
-        if size_kb > 64 and keyframes > 100:
-            warning = (
-                f"⚠️ File terlalu besar ({size_kb:.2f} KB) dan punya banyak keyframe ({keyframes}).\n"
-                "Pilih metode untuk mengurangi ukuran:"
-            )
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔧 Compress", callback_data="optimize")],
-                [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")]
-            ])
-            warn_msg = await query.message.reply_text(warning, reply_markup=keyboard)
-            context.user_data["last_bot_msg"] = warn_msg.message_id
 
         del context.user_data["json_bytes"]
 
