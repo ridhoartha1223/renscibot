@@ -120,7 +120,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [
-            InlineKeyboardButton("🎨 Normal", callback_data="normal"),
+            InlineKeyboardButton("🪄 Normal", callback_data="normal"),
             InlineKeyboardButton("⚡ Optimize", callback_data="optimize")
         ],
         [InlineKeyboardButton("❌ Batal", callback_data="reset")]
@@ -207,7 +207,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = [
             [
-                InlineKeyboardButton("🎨 Normal", callback_data="normal"),
+                InlineKeyboardButton("🪄 Normal", callback_data="normal"),
                 InlineKeyboardButton("⚡ Optimize", callback_data="optimize")
             ],
             [InlineKeyboardButton("❌ Batal", callback_data="reset")]
@@ -241,7 +241,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "back_optimize":
         keyboard = [
             [
-                InlineKeyboardButton("🎨 Normal", callback_data="normal"),
+                InlineKeyboardButton("🪄 Normal", callback_data="normal"),
                 InlineKeyboardButton("⚡ Optimize", callback_data="optimize")
             ],
             [InlineKeyboardButton("❌ Batal", callback_data="reset")]
@@ -271,7 +271,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = [
             [
-                InlineKeyboardButton("🎨 Normal", callback_data="normal"),
+                InlineKeyboardButton("🪄 Normal", callback_data="normal"),
                 InlineKeyboardButton("⚡ Optimize", callback_data="optimize")
             ],
             [InlineKeyboardButton("❌ Batal", callback_data="reset")]
