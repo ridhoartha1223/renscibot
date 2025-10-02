@@ -7,9 +7,10 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 
 TOKEN = os.getenv("BOT_TOKEN")
 
+# -------------------- UTILITIES --------------------
 def gzip_bytes(data: bytes) -> BytesIO:
     out = BytesIO()
-    with gzip.GzipFile(fileobj=out, mode="w") as f:
+    with gzip.GzipFile(fileobj=out, mode="w", compresslevel=9) as f:
         f.write(data)
     out.seek(0)
     out.name = "emoji.tgs"
@@ -22,7 +23,9 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
     def clean(obj):
         if isinstance(obj, dict):
-            return {k: clean(v) for k, v in obj.items() if v not in [0, 0.0, False, None, "", [], {}] and k not in ["ix", "a", "ddd", "bm", "mn", "hd", "cl", "ln", "tt"]}
+            return {k: clean(v) for k, v in obj.items() 
+                    if v not in [0, 0.0, False, None, "", [], {}] 
+                    and k not in ["ix", "a", "ddd", "bm", "mn", "hd", "cl", "ln", "tt"]}
         elif isinstance(obj, list):
             return [clean(item) for item in obj if item not in [None, {}, []]]
         elif isinstance(obj, float):
@@ -37,7 +40,9 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
     def simplify_keyframes(obj):
         if isinstance(obj, dict):
             if "k" in obj and isinstance(obj["k"], list) and len(obj["k"]) > 2:
-                obj["k"] = obj["k"][::2]
+                # Hanya hapus keyframe jika ada waktu 't'
+                if all(isinstance(kf, dict) and "t" in kf for kf in obj["k"]):
+                    obj["k"] = obj["k"][::2]
             for key in obj:
                 simplify_keyframes(obj[key])
         elif isinstance(obj, list):
@@ -66,18 +71,29 @@ def extract_json_info(json_bytes: bytes) -> str:
         assets = len(data.get("assets", []))
         name = data.get("nm", "Tanpa Nama")
         duration = data.get("op", 0) / data.get("fr", 1)
+        size_kb = len(json_bytes) / 1024
         return (
             f"📄 *Preview JSON*\n"
             f"• Nama: `{name}`\n"
             f"• Layer: `{layers}`\n"
             f"• Asset: `{assets}`\n"
-            f"• Durasi: `{duration:.2f}` detik"
+            f"• Durasi: `{duration:.2f}` detik\n"
+            f"• Ukuran file: `{size_kb:.2f} KB`"
         )
     except Exception:
         return "❌ Gagal membaca isi JSON."
 
+# -------------------- HANDLERS --------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Kirim file `.json` untuk aku ubah jadi `.tgs`!")
+    keyboard = [
+        [InlineKeyboardButton("📄 Kirim JSON", callback_data="send_json")],
+        [InlineKeyboardButton("ℹ️ Bantuan", callback_data="help")]
+    ]
+    await update.message.reply_text(
+        "👋 Hai! Aku bot untuk mengubah file JSON menjadi TGS (Telegram Sticker).\n\n"
+        "Klik tombol di bawah untuk mulai!",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
@@ -110,6 +126,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "reset":
         context.user_data.clear()
         await query.edit_message_text("✅ Semua data direset. Kirim file baru untuk mulai lagi.")
+        return
+    if query.data in ["help", "send_json"]:
+        if query.data == "help":
+            text = (
+                "ℹ️ *Panduan Penggunaan*\n\n"
+                "1. Kirim file `.json` animasi Lottie.\n"
+                "2. Pilih mode konversi:\n"
+                "   • Normal → Konversi standar\n"
+                "   • Optimized Safe → Hapus data tidak penting\n"
+                "   • Reduce Keyframes → Kurangi jumlah keyframe\n"
+                "3. Terima hasil `.tgs` siap pakai sebagai stiker Telegram."
+            )
+            await query.edit_message_text(text, parse_mode="Markdown")
+        elif query.data == "send_json":
+            await query.edit_message_text("📤 Silakan kirim file `.json` untuk dikonversi.")
         return
 
     if "json_bytes" not in context.user_data:
@@ -149,6 +180,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
 
+# -------------------- MAIN --------------------
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
