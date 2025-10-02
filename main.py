@@ -85,10 +85,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tgs_data = convert_json_to_tgs_optimize(json_bytes)
             mode = "Optimize"
 
-        # Preview sebagai sticker
-        await query.message.reply_sticker(tgs_data)
+        # 👉 Kirim sebagai sticker langsung (biar animasi muncul)
+        await query.message.reply_sticker(sticker=tgs_data)
 
-        # Kirim juga file .tgs untuk simpan/upload manual
+        # Tambahkan file .tgs juga buat jaga-jaga
         await query.message.reply_document(
             document=tgs_data,
             filename="result.tgs",
@@ -111,3 +111,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
