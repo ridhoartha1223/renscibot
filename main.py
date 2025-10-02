@@ -117,19 +117,22 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["json_bytes"] = json_bytes
 
     preview = extract_json_info(json_bytes)
-keyboard = [
+
+    keyboard = [
         [
             InlineKeyboardButton("🎨 Normal", callback_data="normal"),
             InlineKeyboardButton("⚡ Optimize", callback_data="optimize")
         ],
         [InlineKeyboardButton("❌ Batal", callback_data="reset")]
     ]
+
     await update.message.reply_text(
         preview,
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+# -------------------- CALLBACK --------------------
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -158,14 +161,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     elif query.data == "send_json":
-    await query.edit_message_text(
-        "✨ *Siap Mengubah JSON-mu Menjadi Emoji!* ✨\n\n"
-        "📤 Kirim file JSON animasi Lottie di bawah ini. \n"
-        "Bot akan memberikan preview dan pilihan mode convert.",
-        parse_mode="Markdown"
-    )
-    return
-
+        await query.edit_message_text(
+            "✨ *Siap Mengubah JSON-mu Menjadi Emoji!* ✨\n\n"
+            "📤 Kirim file JSON animasi Lottie di bawah ini.",
+            parse_mode="Markdown"
+        )
+        return
 
     if query.data == "reset":
         context.user_data.clear()
@@ -292,5 +293,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
