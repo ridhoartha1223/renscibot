@@ -1,67 +1,120 @@
+import logging
+import requests
 import os
-from pyrogram import Client, filters, idle
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update
+from telegram.ext import Application, CommandHandler
+from io import BytesIO
 
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# --- 1. KONFIGURASI BOT DAN API KEY (Ambil dari Environment Variables Railway) ---
 
-app = Client(":memory:", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# Railway akan menyediakan variabel ini di pengaturan Environment Variables Anda.
+# Kita ambil menggunakan os.environ.get()
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+HUGGING_FACE_API_KEY = os.environ.get("HUGGING_FACE_API_KEY")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL") # Ini URL yang dibuat oleh Railway
 
-user_state = {}  # simpan state sementara user
+# Tambahkan PORT karena Railway mengharuskan kita mendengarkan port tertentu
+PORT = int(os.environ.get("PORT", "8080"))
 
-# /start → menu interaktif
-@app.on_message(filters.command("start"))
-async def start(client, message):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Upload .TGS", callback_data="upload_tgs")]
-    ])
-    await message.reply(
-        "Selamat datang! Pilih fitur:", reply_markup=keyboard
+# Model Hugging Face dan Headers
+API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1" 
+HEADERS = {"Authorization": f"Bearer {HUGGING_FACE_API_KEY}"}
+
+# Konfigurasi Logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# --- 2. FUNGSI UNTUK MENGIRIM PERMINTAAN KE HUGGING FACE ---
+
+def query_huggingface(payload):
+    """Mengirim prompt ke API Hugging Face dan mengembalikan data gambar biner."""
+    response = requests.post(API_URL, headers=HEADERS, json=payload)
+    
+    if response.status_code == 200:
+        return response.content
+    else:
+        logger.error(f"Error dari Hugging Face API: {response.status_code} - {response.text}")
+        if "is currently loading" in response.text:
+            raise Exception("Model AI sedang dimuat (Cold Start). Coba lagi dalam 10 detik.")
+        raise Exception("Gagal menghasilkan gambar dari Hugging Face.")
+
+# --- 3. FUNGSI BOT TELEGRAM ---
+
+async def start(update: Update, context) -> None:
+    """Mengirim pesan sambutan saat perintah /start digunakan."""
+    await update.message.reply_text(
+        "Halo! Saya adalah Bot Generator Gambar AI GRATIS (di-host di Railway). "
+        "Gunakan perintah /gambar [teks deskripsi Anda] untuk membuat gambar.\n\n"
+        "Contoh: /gambar king arthur"
     )
 
-# Callback query → set user state
-@app.on_callback_query()
-async def callback_handler(client, query):
-    action = query.data
-    user_state[query.from_user.id] = action
-
-    if action == "upload_tgs":
-        await query.message.reply("Silakan kirim file .tgs yang ingin dicek/upload.")
-
-# Handler document
-@app.on_message(filters.document)
-async def document_handler(client, message: Message):
-    action = user_state.get(message.from_user.id)
-    if not action:
+async def generate_image(update: Update, context) -> None:
+    """Menghasilkan gambar AI dari teks pengguna menggunakan Hugging Face."""
+    
+    if not context.args:
+        await update.message.reply_text("Mohon berikan deskripsi gambar setelah perintah /gambar.")
         return
 
-    if not message.document.file_name.endswith(".tgs"):
-        await message.reply("❌ File bukan .tgs. Silakan kirim file yang benar.")
-        return
+    user_prompt = " ".join(context.args)
+    
+    # LOGIKA CHIBI OTOMATIS
+    chibi_style = ", cute chibi style, miniature figure, vibrant colors, digital illustration, high quality"
+    final_prompt = user_prompt + chibi_style
+    
+    await update.message.reply_text(
+        f"⏳ Sedang membuat gambar untuk '{user_prompt}' dalam gaya chibi. "
+        f"Ini mungkin memakan waktu 30-60 detik karena menggunakan layanan gratis. Mohon bersabar..."
+    )
 
-    file_path = await message.download()
     try:
-        size = os.path.getsize(file_path)
-        if size > 64 * 1024:
-            await message.reply("⚠️ File lebih dari 64KB! Tidak bisa dijadikan emoji.")
-        else:
-            await message.reply_document(file_path, caption="✅ File .tgs berhasil diterima!")
+        image_bytes = query_huggingface({"inputs": final_prompt})
+        
+        image_file = BytesIO(image_bytes)
+        image_file.name = "ai_chibi_image.png"
+        
+        await update.message.reply_photo(
+            photo=image_file, 
+            caption=f"✨ {user_prompt} (Gaya Chibi)"
+        )
+
     except Exception as e:
-        await message.reply(f"❌ Error: {e}")
-    finally:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        user_state.pop(message.from_user.id, None)
+        await update.message.reply_text(f"❌ Maaf, terjadi kesalahan: {e}")
 
-# Debug ping
-@app.on_message(filters.private & filters.command("ping"))
-async def debug_ping(client, message):
-    await message.reply("✅ Bot connected and working!")
 
-if __name__ == "__main__":
-    print("🚀 Bot starting...")
-    app.start()
-    print("🚀 Bot running...")
-    idle()
-    app.stop()
+# --- 4. FUNGSI UNTUK MENJALANKAN BOT DENGAN WEBHOOKS ---
+
+def main() -> None:
+    """Menjalankan bot menggunakan Webhooks untuk deployment."""
+    
+    if not TELEGRAM_BOT_TOKEN or not WEBHOOK_URL:
+        logger.error("TELEGRAM_BOT_TOKEN atau WEBHOOK_URL belum diset. Bot tidak bisa dijalankan.")
+        return
+
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Menambahkan handler
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("gambar", generate_image))
+
+    # Konfigurasi Webhook untuk Railway
+    # Path (jalur) yang akan didengarkan oleh bot di Railway
+    webhook_path = "/telegram" 
+
+    # 1. Menentukan URL untuk didengarkan (port Railway)
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=webhook_path
+    )
+    # 2. Memberi tahu Telegram URL Webhook kita
+    # URL lengkap yang didaftarkan ke Telegram adalah URL domain Railway + path
+    full_webhook_url = WEBHOOK_URL + webhook_path
+    application.bot.set_webhook(full_webhook_url)
+
+    logger.info(f"Bot berjalan dengan Webhook di URL: {full_webhook_url}")
+
+if name == "__main__":
+    main()
