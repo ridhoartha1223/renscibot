@@ -47,22 +47,17 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
-def compress_json_bytes(json_bytes: bytes) -> BytesIO:
-    data = json.loads(json_bytes.decode("utf-8"))
-    def round_numbers(obj):
-        if isinstance(obj, dict):
-            return {k: round_numbers(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [round_numbers(item) for item in obj]
-        elif isinstance(obj, float):
-            return round(obj, 3)
-        return obj
-    data = round_numbers(data)
-    compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    out = BytesIO(compact)
-    out.name = "compressed.json"
-    out.seek(0)
-    return out
+def count_keyframes(json_bytes: bytes) -> int:
+    try:
+        data = json.loads(json_bytes.decode("utf-8"))
+        count = 0
+        for layer in data.get("layers", []):
+            for prop in layer.get("ks", {}).values():
+                if isinstance(prop, dict) and isinstance(prop.get("k"), list):
+                    count += len(prop["k"])
+        return count
+    except Exception:
+        return 0
 
 def extract_json_info(json_bytes: bytes) -> str:
     try:
@@ -81,36 +76,8 @@ def extract_json_info(json_bytes: bytes) -> str:
     except Exception:
         return "❌ Gagal membaca isi JSON."
 
-def count_keyframes(json_bytes: bytes) -> int:
-    try:
-        data = json.loads(json_bytes.decode("utf-8"))
-        count = 0
-        for layer in data.get("layers", []):
-            for prop in layer.get("ks", {}).values():
-                if isinstance(prop, dict) and isinstance(prop.get("k"), list):
-                    count += len(prop["k"])
-        return count
-    except Exception:
-        return 0
-        async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = (
-        "👋 Selamat datang di *Emoji Converter Bot*\n\n"
-        "Aku bisa mengubah file **JSON (AE/Bodymovin)** jadi animasi **TGS**.\n\n"
-        "📌 Gunakan /menu untuk membuka dashboard."
-    )
-    await update.message.reply_text(msg, parse_mode="Markdown")
-
-async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🌘 Convert JSON → TGS", callback_data="menu_convert")],
-        [InlineKeyboardButton("🖤 Compress JSON → JSON kecil", callback_data="menu_compress_json")],
-        [InlineKeyboardButton("🧨 Reset / Cancel", callback_data="menu_reset")]
-    ]
-    await update.message.reply_text(
-        "🌑 *Dark Dashboard*\nPilih aksi yang kamu mau:",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Kirim file `.json` untuk aku ubah jadi `.tgs`!")
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
@@ -125,47 +92,24 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     preview = extract_json_info(json_bytes)
     await update.message.reply_text(preview, parse_mode="Markdown")
 
-    mode_selected = context.user_data.get("mode", "manual")
+    keyboard = [
+        [InlineKeyboardButton("🎨 Normal", callback_data="normal")],
+        [InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
+        [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")],
+        [InlineKeyboardButton("❌ Batal", callback_data="reset")]
+    ]
+    await update.message.reply_text(
+        "✅ File JSON diterima!\nPilih metode konversi TGS:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-    if mode_selected == "convert":
-        keyboard = [
-            [InlineKeyboardButton("🎨 Normal", callback_data="normal")],
-            [InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
-            [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")],
-            [InlineKeyboardButton("❌ Batal", callback_data="menu_reset")]
-        ]
-        await update.message.reply_text(
-            "✅ File JSON diterima!\nPilih metode konversi TGS:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    elif mode_selected == "compress_json":
-        compressed_file = compress_json_bytes(json_bytes)
-        await update.message.reply_document(document=InputFile(compressed_file, filename="compressed.json"))
-        await update.message.reply_text("✅ JSON berhasil dikompres!")
-        del context.user_data["json_bytes"]
-
-    else:
-        await update.message.reply_text(
-            "✅ File JSON diterima!\nGunakan tombol untuk memilih mode konversi."
-        )
-        async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "menu_reset":
+    if query.data == "reset":
         context.user_data.clear()
-        await query.edit_message_text("✅ Semua data direset. Mulai lagi dengan /menu.")
-        return
-
-    if query.data == "menu_convert":
-        context.user_data["mode"] = "convert"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Convert → TGS*.")
-        return
-
-    if query.data == "menu_compress_json":
-        context.user_data["mode"] = "compress_json"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Compress JSON → JSON kecil*.")
+        await query.edit_message_text("✅ Semua data direset. Kirim file baru untuk mulai lagi.")
         return
 
     if "json_bytes" not in context.user_data:
@@ -208,7 +152,6 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
     app.add_handler(CallbackQueryHandler(button))
     app.run_polling()
