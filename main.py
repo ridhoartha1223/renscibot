@@ -4,12 +4,12 @@ import gzip
 import random
 import string
 from io import BytesIO
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputSticker
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
-BOT_USERNAME = os.getenv("BOT_USERNAME")  # @username bot, wajib jika ingin createNewStickerSet
-IS_PREMIUM = os.getenv("BOT_PREMIUM", "false").lower() == "true"  # set true jika bot premium
+BOT_USERNAME = os.getenv("BOT_USERNAME")  # @username bot
+IS_PREMIUM = os.getenv("BOT_PREMIUM", "false").lower() == "true"  # true jika bot premium
 
 # =========================================================
 # Helper: JSON -> gzip TGS
@@ -68,7 +68,6 @@ def auto_compress(json_bytes: bytes):
     return tgs_file, name, size_kb
 
 def random_suffix(n=6):
-    import string, random
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
 # =========================================================
@@ -79,13 +78,16 @@ async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_
     bot = context.bot
     set_name = f"user{user.id}_emoji_{random_suffix()}_by_{BOT_USERNAME.strip('@')}"
     title = f"{user.first_name}'s Emoji Set"
+
+    sticker = InputSticker(sticker=tgs_file, emoji="😀")
+    stickers = [sticker]
+
     try:
         await bot.create_new_sticker_set(
             user_id=user.id,
             name=set_name,
             title=title,
-            emojis="😀",
-            stickers=[tgs_file],
+            stickers=stickers,
             sticker_format="animated"
         )
         link = f"https://t.me/addemoji/{set_name}"
