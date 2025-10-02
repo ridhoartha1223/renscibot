@@ -62,18 +62,18 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
 # Handlers
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🎨 Convert JSON → TGS (Normal)", callback_data="normal")],
-        [InlineKeyboardButton("⚡ Convert JSON → TGS (Optimized Safe)", callback_data="optimize")]
-    ]
-    await update.message.reply_text(
-        "👋 Hai, aku bot konversi Emoji JSON → TGS!\n\n"
-        "Kirim file `.json` hasil export AE (Bodymovin), nanti pilih metode konversi:\n"
-        "• 🎨 Normal → langsung jadi TGS\n"
-        "• ⚡ Optimized Safe → size lebih kecil (masih animasi)\n\n"
-        "Kalau size > 64KB, aku kasih opsi ✂️ Reduce Keyframes otomatis.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+    msg = (
+        "👋 Selamat datang di *Emoji Converter Bot*\n\n"
+        "Aku bisa mengubah file **JSON (AE/Bodymovin)** jadi animasi **TGS** untuk Emoji Premium Telegram.\n\n"
+        "📌 Cara pakai:\n"
+        "1️⃣ Kirim file `.json` hasil export dari After Effects\n"
+        "2️⃣ Pilih metode konversi:\n"
+        "   • 🎨 Normal → langsung jadi TGS\n"
+        "   • ⚡ Optimized Safe → lebih kecil, tetap animasi\n"
+        "3️⃣ Kalau file >64KB → akan muncul opsi ✂️ Reduce Keyframes otomatis\n\n"
+        "🚀 Ayo coba kirim file JSON-mu sekarang!"
     )
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
@@ -105,12 +105,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     json_bytes = context.user_data["json_bytes"]
 
     try:
+        # tampilkan loading
+        loading = await query.message.reply_text("⏳ Sedang memproses konversi...")
+
         if query.data == "normal":
             tgs_file = json_to_tgs(json_bytes)
             mode = "Normal"
         elif query.data == "optimize":
             tgs_file = optimize_json_to_tgs(json_bytes)
-            mode = "Optimized"
+            mode = "Optimized Safe"
         elif query.data == "reduce":
             tgs_file = reduce_keyframes_json(json_bytes)
             mode = "Reduce Keyframes"
@@ -125,20 +128,25 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             indicator = "🔴"
             note = "File terlalu besar, coba Reduce Keyframes!"
 
+        # hapus pesan loading
+        await loading.delete()
+
         # kirim animasi sebagai sticker
         await query.message.reply_sticker(
             sticker=tgs_file,
         )
         await query.message.reply_text(
-            f"{indicator} {mode} selesai!\n"
-            f"📦 Size: {size_kb:.2f} KB\n{note}"
+            f"✅ Konversi *{mode}* selesai!\n"
+            f"📦 Size: {size_kb:.2f} KB\n"
+            f"{indicator} {note}",
+            parse_mode="Markdown"
         )
 
         # kalau kegedean, kasih opsi reduce keyframes
         if size_kb > 64 and query.data != "reduce":
             keyboard = [[InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")]]
             await query.message.reply_text(
-                "❗ File terlalu besar, mau coba kurangi keyframes?",
+                "⚠️ File terlalu besar, mau coba kurangi keyframes?",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
