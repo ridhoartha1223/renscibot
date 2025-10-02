@@ -2,7 +2,6 @@ import os
 import json
 import gzip
 import random
-import string
 from io import BytesIO
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputSticker
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -68,10 +67,11 @@ def auto_compress(json_bytes: bytes):
     return tgs_file, name, size_kb
 
 def random_suffix(n=6):
+    import string
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
 # =========================================================
-# Telegram Sticker Set
+# Telegram Sticker Set (PTB v23+)
 # =========================================================
 async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_TYPE, tgs_file: BytesIO):
     user = update.effective_user
@@ -79,7 +79,7 @@ async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_
     set_name = f"user{user.id}_emoji_{random_suffix()}_by_{BOT_USERNAME.strip('@')}"
     title = f"{user.first_name}'s Emoji Set"
 
-    sticker = InputSticker(sticker=tgs_file)
+    sticker = InputSticker(sticker=tgs_file, emoji_list=["😀"], format="animated")
     stickers = [sticker]
 
     try:
@@ -87,9 +87,7 @@ async def create_user_sticker_set(update: Update, context: ContextTypes.DEFAULT_
             user_id=user.id,
             name=set_name,
             title=title,
-            stickers=stickers,
-            sticker_format="animated",
-            emojis="😀"  # emoji di sini, bukan di InputSticker
+            stickers=stickers
         )
         link = f"https://t.me/addemoji/{set_name}"
         return link
