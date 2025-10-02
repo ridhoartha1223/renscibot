@@ -117,9 +117,12 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     # Kirim preview modern
-    await update.message.reply_text(preview, parse_mode="Markdown")
     await update.message.reply_text(
-        "✅ File JSON diterima!\nPilih metode konversi TGS:",
+        "✅ *File JSON berhasil diterima!* 🎉\n\n" + preview,
+        parse_mode="Markdown"
+    )
+    await update.message.reply_text(
+        "Pilih metode konversi TGS dengan tombol di bawah:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -152,7 +155,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     elif query.data == "send_json":
-        await query.edit_message_text("📤 Silakan kirim file `.json` untuk dikonversi.")
+        await query.edit_message_text(
+            "📤 *Silakan kirim file `.json` animasi Lottie untuk dikonversi!*",
+            parse_mode="Markdown"
+        )
         return
 
     # ------------------- Reset -------------------
@@ -169,9 +175,16 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     json_bytes = context.user_data["json_bytes"]
 
     try:
-        # Hapus pesan sebelumnya
-        await query.message.delete()
+        # Hapus preview hasil convert sebelumnya (jika ada)
+        for msg in context.user_data.get("last_messages", []):
+            try:
+                await msg.delete()
+            except:
+                continue
+        context.user_data["last_messages"] = []
+
         loading_msg = await query.message.reply_text("⏳ Sedang memproses...")
+        context.user_data["last_messages"].append(loading_msg)
 
         if query.data == "normal":
             tgs_file = json_to_tgs(json_bytes)
@@ -191,7 +204,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyframes = count_keyframes(json_bytes)
 
         # Kirim sticker
-        await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
+        sticker_msg = await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
+        context.user_data["last_messages"].append(sticker_msg)
 
         # Inline keyboard tetap muncul agar user bisa pilih mode lain
         keyboard = [
@@ -201,11 +215,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton("❌ Batal", callback_data="reset")]
         ]
 
-        await query.message.reply_text(
+        info_msg = await query.message.reply_text(
             f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB\n🔑 Keyframes: {keyframes}",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+        context.user_data["last_messages"].append(info_msg)
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
