@@ -26,11 +26,14 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
 
     def round_numbers(obj):
         if isinstance(obj, dict):
-            return {k: round_numbers(v) for k, v in obj.items()}
+            new_dict = {}
+            for k, val in obj.items():
+                new_dict[k] = round_numbers(val)
+            return new_dict
         elif isinstance(obj, list):
-            return [round_numbers(v) for v in obj]
+            return [round_numbers(item) for item in obj]
         elif isinstance(obj, float):
-            return round(v, 3)
+            return round(obj, 3)
         return obj
 
     data = round_numbers(data)
@@ -62,11 +65,14 @@ def compress_json_bytes(json_bytes: bytes) -> BytesIO:
 
     def round_numbers(obj):
         if isinstance(obj, dict):
-            return {k: round_numbers(v) for k, v in obj.items()}
+            new_dict = {}
+            for k, val in obj.items():
+                new_dict[k] = round_numbers(val)
+            return new_dict
         elif isinstance(obj, list):
-            return [round_numbers(v) for v in obj]
+            return [round_numbers(item) for item in obj]
         elif isinstance(obj, float):
-            return round(v, 3)
+            return round(obj, 3)
         return obj
 
     data = round_numbers(data)
@@ -199,4 +205,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
