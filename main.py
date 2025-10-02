@@ -1,73 +1,75 @@
 import os
-import gzip
 import json
-import logging
-import io
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters,
-    ContextTypes,
-)
+import gzip
+from io import BytesIO
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-# Logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-# Fungsi konversi normal
-def convert_json_to_tgs(json_bytes: bytes) -> bytes:
+# ========= Konversi JSON ke TGS =========
+def convert_json_to_tgs(json_bytes: bytes) -> BytesIO:
+    """Convert JSON -> TGS tanpa optimasi"""
     data = json.loads(json_bytes.decode("utf-8"))
-    buf = io.BytesIO()
-    with gzip.GzipFile(fileobj=buf, mode="w") as f:
-        f.write(json.dumps(data).encode("utf-8"))
-    buf.seek(0)
-    return buf.read()
+    compact = json.dumps(data, separators=(',', ':')).encode("utf-8")
 
-# Fungsi konversi optimize
-def convert_json_to_tgs_optimize(json_bytes: bytes) -> bytes:
+    buffer = BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode="w", compresslevel=9) as f:
+        f.write(compact)
+    buffer.seek(0)
+    buffer.name = "result.tgs"
+    return buffer
+
+def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
+    """Convert JSON -> TGS optimized (target <64KB untuk emoji premium)"""
     data = json.loads(json_bytes.decode("utf-8"))
-    buf = io.BytesIO()
-    with gzip.GzipFile(fileobj=buf, mode="w") as f:
-        f.write(json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    buf.seek(0)
-    return buf.read()
 
-# Start
+    # Turunkan framerate jika terlalu tinggi
+    if "fr" in data and data["fr"] > 30:
+        data["fr"] = 30
+
+    # Hapus metadata tidak penting
+    for key in ["meta"]:
+        if key in data:
+            del data[key]
+
+    # Serialize JSON dengan compact (tanpa spasi)
+    compact = json.dumps(data, separators=(',', ':')).encode("utf-8")
+
+    # Gzip ke TGS
+    buffer = BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode="w", compresslevel=9) as f:
+        f.write(compact)
+    buffer.seek(0)
+    buffer.name = "result_optimized.tgs"
+    return buffer
+
+# ========= Handler =========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Kirimkan file `.json` untuk saya convert ke TGS!")
+    await update.message.reply_text("👋 Kirim file JSON hasil export Bodymovin (AE).")
 
-# Handler file
-async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    document = update.message.document
-    if not document.file_name.endswith(".json"):
-        await update.message.reply_text("⚠️ Harap kirim file dengan format `.json`.")
+async def handle_json(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    doc = update.message.document
+    if not doc.file_name.endswith(".json"):
+        await update.message.reply_text("❌ Hanya mendukung file .json dari Bodymovin.")
         return
 
-    file = await document.get_file()
-    file_bytes = await file.download_as_bytearray()
+    file = await doc.get_file()
+    json_bytes = await file.download_as_bytearray()
 
-    # Simpan JSON di memory user
-    context.user_data["json_bytes"] = file_bytes
+    # Simpan ke user_data untuk tombol
+    context.user_data["json_bytes"] = json_bytes
 
-    # Kirim tombol
+    # Kirim tombol pilihan
     keyboard = [
         [
-            InlineKeyboardButton("📂 JSON → TGS", callback_data="normal"),
-            InlineKeyboardButton("⚡ JSON → TGS Optimize", callback_data="optimize"),
+            InlineKeyboardButton("📦 JSON → TGS Normal", callback_data="normal"),
+            InlineKeyboardButton("⚡ JSON → TGS Optimized", callback_data="optimize"),
         ]
     ]
     await update.message.reply_text(
-        "Pilih mode konversi:", reply_markup=InlineKeyboardMarkup(keyboard)
+        "Pilih mode konversi:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# Callback tombol
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -79,36 +81,25 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if query.data == "normal":
-            tgs_data = convert_json_to_tgs(json_bytes)
+            tgs_file = convert_json_to_tgs(json_bytes)
             mode = "Normal"
         else:
-            tgs_data = convert_json_to_tgs_optimize(json_bytes)
-            mode = "Optimize"
+            tgs_file = optimize_json_to_tgs(json_bytes)
+            mode = "Optimized"
 
-        # 👉 Kirim sebagai sticker langsung (biar animasi muncul)
-        await query.message.reply_sticker(sticker=tgs_data)
+        # ✅ Kirim sebagai animasi sticker (bukan dokumen!)
+        await query.message.reply_sticker(sticker=InputFile(tgs_file, filename=tgs_file.name))
 
-        # Tambahkan file .tgs juga buat jaga-jaga
+        # Opsional: kirim juga file .tgs (backup)
         await query.message.reply_document(
-            document=tgs_data,
-            filename="result.tgs",
-            caption=f"✅ Konversi selesai dengan mode *{mode}*"
+            document=InputFile(tgs_file, filename=tgs_file.name),
+            caption=f"✅ Konversi selesai ({mode})"
         )
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {e}")
 
+# ========= Main =========
 def main():
-    if not BOT_TOKEN:
-        raise ValueError("❌ BOT_TOKEN belum di-set di Railway ENV")
-
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
-    app.add_handler(CallbackQueryHandler(button_callback))
-
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
-
+    token = os.getenv("BOT_TOKEN")  # set di Railway sebagai env var
+    app = Appl
