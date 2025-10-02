@@ -111,8 +111,7 @@ def count_keyframes(json_bytes: bytes) -> int:
         return count
     except Exception:
         return 0
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "👋 Selamat datang di *Emoji Converter Bot*\n\n"
         "Aku bisa mengubah file **JSON (AE/Bodymovin)** jadi animasi **TGS**.\n\n"
@@ -132,7 +131,8 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-   async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
     if not document.file_name.endswith(".json"):
         await update.message.reply_text("❌ Tolong kirim file dengan format `.json`.")
@@ -179,8 +179,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "✅ File JSON diterima!\nGunakan tombol untuk memilih mode konversi."
         )
-
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
@@ -284,4 +283,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
