@@ -26,7 +26,6 @@ def json_to_tgs(json_bytes: bytes) -> BytesIO:
 
 def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
-
     def round_numbers(obj):
         if isinstance(obj, dict):
             return {k: round_numbers(v) for k, v in obj.items()}
@@ -35,14 +34,12 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
         elif isinstance(obj, float):
             return round(obj, 3)
         return obj
-
     data = round_numbers(data)
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
 def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
-
     def simplify_keyframes(obj):
         if isinstance(obj, dict):
             if "k" in obj and isinstance(obj["k"], list) and len(obj["k"]) > 2:
@@ -52,31 +49,25 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
         elif isinstance(obj, list):
             for item in obj:
                 simplify_keyframes(item)
-
     simplify_keyframes(data)
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
-# =========================================================
-# Auto Compress Helper
-# =========================================================
 def auto_compress(json_bytes: bytes) -> (BytesIO, str, float):
     methods = [
         ("Normal", json_to_tgs),
         ("Optimized Safe", optimize_json_to_tgs),
         ("Reduce Keyframes", reduce_keyframes_json),
     ]
-
     for name, func in methods:
         tgs_file = func(json_bytes)
         size_kb = len(tgs_file.getvalue()) / 1024
         if size_kb <= 64:
             return tgs_file, name, size_kb
-
     return tgs_file, name, size_kb
 
 # =========================================================
-# AI Assistant Helper
+# AI Assistant
 # =========================================================
 async def ai_request_edit(prompt: str, image_bytes: bytes) -> BytesIO:
     """
@@ -88,10 +79,8 @@ async def ai_request_edit(prompt: str, image_bytes: bytes) -> BytesIO:
         "prompt": (None, prompt)
     }
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
-
     resp = requests.post(url, headers=headers, files=files)
     data = resp.json()
-
     img_base64 = data["data"][0]["b64_json"]
     img_bytes = base64.b64decode(img_base64)
     out = BytesIO(img_bytes)
@@ -121,7 +110,12 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Handler untuk JSON (Convert / Auto Compress)
+async def handle_json_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mode = context.user_data.get("mode")
+    if mode not in ["convert", "autocompress"]:
+        return  # skip kalau bukan mode JSON
+
     document = update.message.document
     if not document.file_name.endswith(".json"):
         await update.message.reply_text("❌ Tolong kirim file dengan format `.json`.")
@@ -131,31 +125,22 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     json_bytes = await file.download_as_bytearray()
     context.user_data["json_bytes"] = json_bytes
 
-    mode_selected = context.user_data.get("mode", "manual")
-
-    if mode_selected == "convert":
+    if mode == "convert":
         keyboard = [
             [InlineKeyboardButton("🎨 Normal", callback_data="normal")],
             [InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
-            [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")]
+            [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")],
         ]
         await update.message.reply_text(
             "✅ File JSON diterima!\nPilih metode konversi:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-
-    elif mode_selected == "autocompress":
-        tgs_file, mode, size_kb = auto_compress(json_bytes)
+    elif mode == "autocompress":
+        tgs_file, method, size_kb = auto_compress(json_bytes)
         await update.message.reply_sticker(sticker=tgs_file)
-        await update.message.reply_text(
-            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
-            parse_mode="Markdown"
-        )
-    else:
-        await update.message.reply_text(
-            "✅ File JSON diterima!\nGunakan tombol untuk memilih mode konversi."
-        )
+        await update.message.reply_text(f"✅ Mode: *{method}*\n📦 Size: {size_kb:.2f} KB", parse_mode="Markdown")
 
+# Handler untuk AI Assistant
 async def handle_ai_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("mode") != "ai":
         return
@@ -166,6 +151,7 @@ async def handle_ai_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     prompt = update.message.caption
 
+    # ambil file image
     if update.message.photo:
         file = await update.message.photo[-1].get_file()
     elif update.message.document and update.message.document.file_name.lower().endswith((".png", ".jpg", ".jpeg")):
@@ -179,9 +165,7 @@ async def handle_ai_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         result_img = await ai_request_edit(prompt, image_bytes)
-
-        # otomatis convert AI result ke TGS
-        # dummy convert: pakai PNG sebagai placeholder TGS
+        # otomatis convert hasil AI ke TGS
         tgs_file = gzip_bytes(result_img.getvalue())
         await loading.delete()
         await update.message.reply_sticker(sticker=tgs_file)
@@ -190,26 +174,24 @@ async def handle_ai_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await loading.delete()
         await update.message.reply_text(f"❌ Gagal proses AI: {str(e)}")
 
+# Callback handler untuk dashboard / tombol
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    data = query.data
 
-    if query.data == "menu_convert":
+    if data == "menu_convert":
         context.user_data["mode"] = "convert"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Convert*.")
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk Convert.")
         return
-
-    if query.data == "menu_autocompress":
+    elif data == "menu_autocompress":
         context.user_data["mode"] = "autocompress"
-        await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Auto Compress*.")
+        await query.edit_message_text("📌 Silakan kirim file `.json` untuk Auto Compress.")
         return
-
-    if query.data == "menu_ai":
+    elif data == "menu_ai":
         context.user_data["mode"] = "ai"
         await query.edit_message_text(
-            "🎭 *AI Assistant Mode*\n\n"
-            "📌 Kirim file gambar/emoji + instruksi edit (di caption).\n"
-            "Contoh: *ubah rambut jadi pink*",
+            "🎭 *AI Assistant Mode*\n📌 Kirim gambar/emoji + instruksi edit di caption.",
             parse_mode="Markdown"
         )
         return
@@ -222,27 +204,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         loading = await query.message.reply_text("⏳ Sedang memproses...")
-
-        if query.data == "normal":
+        if data == "normal":
             tgs_file = json_to_tgs(json_bytes)
-            mode = "Normal"
-        elif query.data == "optimize":
+            mode_name = "Normal"
+        elif data == "optimize":
             tgs_file = optimize_json_to_tgs(json_bytes)
-            mode = "Optimized Safe"
-        elif query.data == "reduce":
+            mode_name = "Optimized Safe"
+        elif data == "reduce":
             tgs_file = reduce_keyframes_json(json_bytes)
-            mode = "Reduce Keyframes"
+            mode_name = "Reduce Keyframes"
         else:
             return
-
         size_kb = len(tgs_file.getvalue()) / 1024
         await loading.delete()
         await query.message.reply_sticker(sticker=tgs_file)
-        await query.message.reply_text(
-            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB",
-            parse_mode="Markdown"
-        )
-
+        await query.message.reply_text(f"✅ Mode: *{mode_name}*\n📦 Size: {size_kb:.2f} KB", parse_mode="Markdown")
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
 
@@ -253,7 +229,7 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_json_file))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_ai_file))
     app.add_handler(CallbackQueryHandler(button))
     app.run_polling()
