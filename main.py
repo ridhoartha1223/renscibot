@@ -40,7 +40,6 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
     def simplify_keyframes(obj):
         if isinstance(obj, dict):
             if "k" in obj and isinstance(obj["k"], list) and len(obj["k"]) > 2:
-                # Hanya hapus keyframe jika ada waktu 't'
                 if all(isinstance(kf, dict) and "t" in kf for kf in obj["k"]):
                     obj["k"] = obj["k"][::2]
             for key in obj:
@@ -74,11 +73,13 @@ def extract_json_info(json_bytes: bytes) -> str:
         size_kb = len(json_bytes) / 1024
         return (
             f"📄 *Preview JSON*\n"
-            f"• Nama: `{name}`\n"
-            f"• Layer: `{layers}`\n"
-            f"• Asset: `{assets}`\n"
-            f"• Durasi: `{duration:.2f}` detik\n"
-            f"• Ukuran file: `{size_kb:.2f} KB`"
+            f"──────────────────\n"
+            f"• 🏷️ Nama: `{name}`\n"
+            f"• 🎞️ Layer: `{layers}`\n"
+            f"• 🗂️ Asset: `{assets}`\n"
+            f"• ⏱️ Durasi: `{duration:.2f}` detik\n"
+            f"• 💾 Ukuran file: `{size_kb:.2f} KB`\n"
+            f"──────────────────"
         )
     except Exception:
         return "❌ Gagal membaca isi JSON."
@@ -106,14 +107,17 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["json_bytes"] = json_bytes
 
     preview = extract_json_info(json_bytes)
-    await update.message.reply_text(preview, parse_mode="Markdown")
 
+    # Inline keyboard untuk mode konversi
     keyboard = [
-        [InlineKeyboardButton("🎨 Normal", callback_data="normal")],
-        [InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
-        [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce")],
-        [InlineKeyboardButton("❌ Batal", callback_data="reset")]
+        [InlineKeyboardButton("🎨 Normal", callback_data="normal"),
+         InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
+        [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce"),
+         InlineKeyboardButton("❌ Batal", callback_data="reset")]
     ]
+
+    # Kirim preview modern
+    await update.message.reply_text(preview, parse_mode="Markdown")
     await update.message.reply_text(
         "✅ File JSON diterima!\nPilih metode konversi TGS:",
         reply_markup=InlineKeyboardMarkup(keyboard)
@@ -123,26 +127,41 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # ------------------- Bantuan & Navigasi -------------------
+    if query.data == "help":
+        help_text = (
+            "ℹ️ *Panduan Penggunaan*\n\n"
+            "1. Kirim file `.json` animasi Lottie.\n"
+            "2. Pilih mode konversi:\n"
+            "   • Normal → Konversi standar\n"
+            "   • Optimized Safe → Hapus data tidak penting\n"
+            "   • Reduce Keyframes → Kurangi jumlah keyframe\n"
+            "3. Terima hasil `.tgs` siap pakai sebagai stiker Telegram."
+        )
+        keyboard = [[InlineKeyboardButton("🔙 Kembali ke Menu Utama", callback_data="main")]]
+        await query.edit_message_text(help_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+    elif query.data == "main":
+        keyboard = [
+            [InlineKeyboardButton("📄 Kirim JSON", callback_data="send_json")],
+            [InlineKeyboardButton("ℹ️ Bantuan", callback_data="help")]
+        ]
+        await query.edit_message_text(
+            "👋 Kembali ke Menu Utama. Klik tombol di bawah untuk mulai!",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    elif query.data == "send_json":
+        await query.edit_message_text("📤 Silakan kirim file `.json` untuk dikonversi.")
+        return
+
+    # ------------------- Reset -------------------
     if query.data == "reset":
         context.user_data.clear()
         await query.edit_message_text("✅ Semua data direset. Kirim file baru untuk mulai lagi.")
         return
-    if query.data in ["help", "send_json"]:
-        if query.data == "help":
-            text = (
-                "ℹ️ *Panduan Penggunaan*\n\n"
-                "1. Kirim file `.json` animasi Lottie.\n"
-                "2. Pilih mode konversi:\n"
-                "   • Normal → Konversi standar\n"
-                "   • Optimized Safe → Hapus data tidak penting\n"
-                "   • Reduce Keyframes → Kurangi jumlah keyframe\n"
-                "3. Terima hasil `.tgs` siap pakai sebagai stiker Telegram."
-            )
-            await query.edit_message_text(text, parse_mode="Markdown")
-        elif query.data == "send_json":
-            await query.edit_message_text("📤 Silakan kirim file `.json` untuk dikonversi.")
-        return
 
+    # ------------------- Konversi JSON -------------------
     if "json_bytes" not in context.user_data:
         await query.edit_message_text("❌ File JSON tidak ditemukan. Kirim ulang.")
         return
@@ -150,7 +169,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     json_bytes = context.user_data["json_bytes"]
 
     try:
-        loading = await query.message.reply_text("⏳ Sedang memproses...")
+        # Hapus pesan sebelumnya
+        await query.message.delete()
+        loading_msg = await query.message.reply_text("⏳ Sedang memproses...")
 
         if query.data == "normal":
             tgs_file = json_to_tgs(json_bytes)
@@ -164,18 +185,27 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             return
 
-        await loading.delete()
+        await loading_msg.delete()
 
         size_kb = len(tgs_file.getvalue()) / 1024
         keyframes = count_keyframes(json_bytes)
 
+        # Kirim sticker
         await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
+
+        # Inline keyboard tetap muncul agar user bisa pilih mode lain
+        keyboard = [
+            [InlineKeyboardButton("🎨 Normal", callback_data="normal"),
+             InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
+            [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce"),
+             InlineKeyboardButton("❌ Batal", callback_data="reset")]
+        ]
+
         await query.message.reply_text(
             f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB\n🔑 Keyframes: {keyframes}",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
-
-        del context.user_data["json_bytes"]
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
