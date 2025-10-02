@@ -6,10 +6,6 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFi
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
-
-# =========================================================
-# Helper: convert JSON -> gzip TGS
-# =========================================================
 def gzip_bytes(data: bytes) -> BytesIO:
     out = BytesIO()
     with gzip.GzipFile(fileobj=out, mode="w") as f:
@@ -23,30 +19,20 @@ def json_to_tgs(json_bytes: bytes) -> BytesIO:
 
 def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
-
     def clean(obj):
         if isinstance(obj, dict):
-            new_obj = {}
-            for k, v in obj.items():
-                if v in [0, 0.0, False, None, "", [], {}]:
-                    continue
-                if k in ["ix", "a", "ddd", "bm", "mn", "hd", "cl", "ln", "tt"]:
-                    continue
-                new_obj[k] = clean(v)
-            return new_obj
+            return {k: clean(v) for k, v in obj.items() if v not in [0, 0.0, False, None, "", [], {}] and k not in ["ix", "a", "ddd", "bm", "mn", "hd", "cl", "ln", "tt"]}
         elif isinstance(obj, list):
             return [clean(item) for item in obj if item not in [None, {}, []]]
         elif isinstance(obj, float):
             return round(obj, 3)
         return obj
-
     cleaned = clean(data)
     compact = json.dumps(cleaned, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
 def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
-
     def simplify_keyframes(obj):
         if isinstance(obj, dict):
             if "k" in obj and isinstance(obj["k"], list) and len(obj["k"]) > 2:
@@ -56,14 +42,12 @@ def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
         elif isinstance(obj, list):
             for item in obj:
                 simplify_keyframes(item)
-
     simplify_keyframes(data)
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
 def compress_json_bytes(json_bytes: bytes) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
-
     def round_numbers(obj):
         if isinstance(obj, dict):
             return {k: round_numbers(v) for k, v in obj.items()}
@@ -72,7 +56,6 @@ def compress_json_bytes(json_bytes: bytes) -> BytesIO:
         elif isinstance(obj, float):
             return round(obj, 3)
         return obj
-
     data = round_numbers(data)
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     out = BytesIO(compact)
@@ -80,10 +63,25 @@ def compress_json_bytes(json_bytes: bytes) -> BytesIO:
     out.seek(0)
     return out
 
-# =========================================================
-# Info & Keyframe Detection
-# =========================================================
-def extract_json_info(json_bytes: bytes) -> str:
+def apply_effect(data, effect):
+    for layer in data.get("layers", []):
+        ks = layer.get("ks", {})
+        if effect == "pop" and "s" in ks:
+            ks["s"]["k"] = [{"t":0,"s":[100,100]}, {"t":10,"s":[120,120]}, {"t":20,"s":[100,100]}]
+        elif effect == "flash" and "o" in ks:
+            ks["o"]["k"] = [{"t":0,"s":100}, {"t":5,"s":0}, {"t":10,"s":100}]
+        elif effect == "rainbow" and "c" in ks:
+            ks["c"]["k"] = [{"t":0,"s":[1,0,0,1]}, {"t":10,"s":[0,1,0,1]}, {"t":20,"s":[0,0,1,1]}]
+        elif effect == "shake" and "p" in ks:
+            ks["p"]["k"] = [{"t":0,"s":[0,0]}, {"t":5,"s":[10,-10]}, {"t":10,"s":[-10,10]}, {"t":15,"s":[0,0]}]
+    return data
+
+def generate_emoji_with_effect(json_bytes: bytes, effect: str) -> BytesIO:
+    data = json.loads(json_bytes.decode("utf-8"))
+    data = apply_effect(data, effect)
+    compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
+    return gzip_bytes(compact)
+    def extract_json_info(json_bytes: bytes) -> str:
     try:
         data = json.loads(json_bytes.decode("utf-8"))
         layers = len(data.get("layers", []))
@@ -111,11 +109,7 @@ def count_keyframes(json_bytes: bytes) -> int:
         return count
     except Exception:
         return 0
-
-# =========================================================
-# Handlers
-# =========================================================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "👋 Selamat datang di *Emoji Converter Bot*\n\n"
         "Aku bisa mengubah file **JSON (AE/Bodymovin)** jadi animasi **TGS**.\n\n"
@@ -127,6 +121,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🌘 Convert JSON → TGS", callback_data="menu_convert")],
         [InlineKeyboardButton("🖤 Compress JSON → JSON kecil", callback_data="menu_compress_json")],
+        [InlineKeyboardButton("✨ Emoji Generator", callback_data="menu_emoji_gen")],
         [InlineKeyboardButton("🧨 Reset / Cancel", callback_data="menu_reset")]
     ]
     await update.message.reply_text(
@@ -168,6 +163,16 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ JSON berhasil dikompres!")
         del context.user_data["json_bytes"]
 
+    elif mode_selected == "emoji_gen":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎨 Pop", callback_data="effect_pop")],
+            [InlineKeyboardButton("💫 Flash", callback_data="effect_flash")],
+            [InlineKeyboardButton("🌈 Rainbow", callback_data="effect_rainbow")],
+            [InlineKeyboardButton("🌀 Shake", callback_data="effect_shake")],
+            [InlineKeyboardButton("❌ Batal", callback_data="menu_reset")]
+        ])
+        await update.message.reply_text("✅ File diterima!\nPilih efek emoji:", reply_markup=keyboard)
+
     else:
         await update.message.reply_text(
             "✅ File JSON diterima!\nGunakan tombol untuk memilih mode konversi."
@@ -196,6 +201,25 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "menu_compress_json":
         context.user_data["mode"] = "compress_json"
         await query.edit_message_text("📌 Silakan kirim file `.json` untuk *Compress JSON → JSON kecil*.")
+        return
+
+    if query.data == "menu_emoji_gen":
+        context.user_data["mode"] = "emoji_gen"
+        await query.edit_message_text("📌 Kirim file `.json` untuk *Emoji Generator*.")
+        return
+
+    if query.data in ["effect_pop", "effect_flash", "effect_rainbow", "effect_shake"]:
+        effect = query.data.replace("effect_", "")
+        json_bytes = context.user_data.get("json_bytes")
+        if not json_bytes:
+            await query.edit_message_text("❌ File JSON tidak ditemukan.")
+            return
+        loading = await query.message.reply_text("⏳ Membuat emoji dengan efek...")
+        tgs_file = generate_emoji_with_effect(json_bytes, effect)
+        await loading.delete()
+        await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
+        await query.message.reply_text(f"✅ Efek *{effect.capitalize()}* berhasil diterapkan!", parse_mode="Markdown")
+        del context.user_data["json_bytes"]
         return
 
     if "json_bytes" not in context.user_data:
@@ -247,10 +271,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {str(e)}")
-        # =========================================================
-# Main
-# =========================================================
-def main():
+        def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
@@ -260,5 +281,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
