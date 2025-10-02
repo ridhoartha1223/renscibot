@@ -23,7 +23,7 @@ def gzip_bytes(data_bytes: bytes) -> BytesIO:
     with gzip.GzipFile(fileobj=buf, mode="w", compresslevel=9) as f:
         f.write(data_bytes)
     buf.seek(0)
-    buf.name = "emoji.tgs"   # wajib pakai nama ini supaya Telegram paham animasi
+    buf.name = "emoji.tgs"   # wajib: supaya Telegram anggap animasi
     return buf
 
 def size_kb(buf: BytesIO) -> float:
@@ -38,19 +38,24 @@ def convert_json_to_tgs(json_bytes: bytes) -> BytesIO:
 def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
 
+    # --- FIELD WAJIB HARUS ADA ---
+    required = ["v", "fr", "ip", "op", "w", "h", "layers"]
+    for r in required:
+        if r not in data:
+            raise ValueError(f"Field wajib hilang: {r}")
+
+    # meta WAJIB ada
+    if "meta" not in data:
+        data["meta"] = {"g": "AE", "a": "", "k": "", "d": "", "tc": ""}
+
     # fps max 20
-    if "fr" in data:
-        try:
-            if float(data["fr"]) > 20:
-                data["fr"] = 20
-        except:
-            pass
+    try:
+        if float(data.get("fr", 30)) > 20:
+            data["fr"] = 20
+    except:
+        pass
 
-    # hapus property ga penting
-    for key in ["meta", "nm", "mn", "cl", "bm", "hd"]:
-        data.pop(key, None)
-
-    # rekursif hapus & cleanup
+    # hanya hapus property tidak penting di dalam layers
     def cleanup(obj):
         if isinstance(obj, dict):
             for k in ["nm", "mn", "cl", "bm", "hd"]:
@@ -60,9 +65,10 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
         elif isinstance(obj, list):
             for item in obj:
                 cleanup(item)
-    cleanup(data)
 
-    # round angka
+    cleanup(data["layers"])
+
+    # round angka biar kecil
     def round_numbers(obj):
         if isinstance(obj, dict):
             return {k: round_numbers(v) for k, v in obj.items()}
@@ -71,6 +77,7 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
         elif isinstance(obj, float):
             return round(obj, 3)
         return obj
+
     data = round_numbers(data)
 
     compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
@@ -79,21 +86,11 @@ def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
 def simplify_keyframes(json_bytes: bytes, step: int = 2) -> BytesIO:
     data = json.loads(json_bytes.decode("utf-8"))
 
-    def round_numbers(obj):
-        if isinstance(obj, dict):
-            return {k: round_numbers(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [round_numbers(v) for v in obj]
-        elif isinstance(obj, float):
-            return round(obj, 3)
-        return obj
-
     def traverse_and_reduce(obj):
         if isinstance(obj, dict):
             for k, v in list(obj.items()):
                 if k == "k" and isinstance(v, list):
-                    reduced = v[::step]
-                    obj[k] = [round_numbers(x) for x in reduced]
+                    obj[k] = v[::step]  # kurangi keyframes
                 else:
                     traverse_and_reduce(v)
         elif isinstance(obj, list):
@@ -184,7 +181,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         kb = size_kb(tgs_buf)
 
-        # kirim selalu sebagai sticker
+        # kirim sebagai sticker
         await query.message.reply_sticker(sticker=InputFile(tgs_buf, filename=tgs_buf.name))
 
         if len(tgs_buf.getvalue()) <= 64 * 1024:
