@@ -4,6 +4,7 @@ import gzip
 from io import BytesIO
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+import random
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -19,36 +20,33 @@ def gzip_bytes(data: bytes) -> BytesIO:
 def json_to_tgs(json_bytes: bytes) -> BytesIO:
     return gzip_bytes(json_bytes)
 
-def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
+def compress_json_level(json_bytes: bytes, level_percent: int) -> BytesIO:
+    """
+    Menghapus sebagian data JSON sesuai persentase level.
+    level_percent: 25, 50, 75, 100
+    """
     data = json.loads(json_bytes.decode("utf-8"))
+
     def clean(obj):
         if isinstance(obj, dict):
-            return {k: clean(v) for k, v in obj.items() 
-                    if v not in [0, 0.0, False, None, "", [], {}] 
-                    and k not in ["ix", "a", "ddd", "bm", "mn", "hd", "cl", "ln", "tt"]}
+            new_obj = {}
+            for k, v in obj.items():
+                # Hapus sebagian key dengan probabilitas sesuai level
+                if random.randint(1, 100) > level_percent:
+                    new_obj[k] = clean(v)
+            return new_obj
         elif isinstance(obj, list):
-            return [clean(item) for item in obj if item not in [None, {}, []]]
+            new_list = []
+            for item in obj:
+                if random.randint(1, 100) > level_percent:
+                    new_list.append(clean(item))
+            return new_list
         elif isinstance(obj, float):
             return round(obj, 3)
         return obj
+
     cleaned = clean(data)
     compact = json.dumps(cleaned, separators=(",", ":")).encode("utf-8")
-    return gzip_bytes(compact)
-
-def reduce_keyframes_json(json_bytes: bytes) -> BytesIO:
-    data = json.loads(json_bytes.decode("utf-8"))
-    def simplify_keyframes(obj):
-        if isinstance(obj, dict):
-            if "k" in obj and isinstance(obj["k"], list) and len(obj["k"]) > 2:
-                if all(isinstance(kf, dict) and "t" in kf for kf in obj["k"]):
-                    obj["k"] = obj["k"][::2]
-            for key in obj:
-                simplify_keyframes(obj[key])
-        elif isinstance(obj, list):
-            for item in obj:
-                simplify_keyframes(item)
-    simplify_keyframes(data)
-    compact = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return gzip_bytes(compact)
 
 def count_keyframes(json_bytes: bytes) -> int:
@@ -108,21 +106,26 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     preview = extract_json_info(json_bytes)
 
-    # Inline keyboard untuk mode konversi
+    # Inline keyboard untuk level compression
     keyboard = [
-        [InlineKeyboardButton("🎨 Normal", callback_data="normal"),
-         InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
-        [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce"),
-         InlineKeyboardButton("❌ Batal", callback_data="reset")]
+        [
+            InlineKeyboardButton("25% Compression", callback_data="level_25"),
+            InlineKeyboardButton("50% Compression", callback_data="level_50")
+        ],
+        [
+            InlineKeyboardButton("75% Compression", callback_data="level_75"),
+            InlineKeyboardButton("100% Compression", callback_data="level_100")
+        ],
+        [InlineKeyboardButton("❌ Batal", callback_data="reset")]
     ]
 
-    # Kirim preview modern
     await update.message.reply_text(
         "✅ *File JSON berhasil diterima!* 🎉\n\n" + preview,
         parse_mode="Markdown"
     )
     await update.message.reply_text(
-        "Pilih metode konversi TGS dengan tombol di bawah:",
+        "Pilih *Level Compression* untuk mengecilkan file sebelum dikonversi ke TGS:",
+        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -135,10 +138,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         help_text = (
             "ℹ️ *Panduan Penggunaan*\n\n"
             "1. Kirim file `.json` animasi Lottie.\n"
-            "2. Pilih mode konversi:\n"
-            "   • Normal → Konversi standar\n"
-            "   • Optimized Safe → Hapus data tidak penting\n"
-            "   • Reduce Keyframes → Kurangi jumlah keyframe\n"
+            "2. Pilih level compression untuk mengecilkan file (25%,50%,75%,100%).\n"
             "3. Terima hasil `.tgs` siap pakai sebagai stiker Telegram."
         )
         keyboard = [[InlineKeyboardButton("🔙 Kembali ke Menu Utama", callback_data="main")]]
@@ -167,7 +167,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✅ Semua data direset. Kirim file baru untuk mulai lagi.")
         return
 
-    # ------------------- Konversi JSON -------------------
+    # ------------------- Level Compression -------------------
     if "json_bytes" not in context.user_data:
         await query.edit_message_text("❌ File JSON tidak ditemukan. Kirim ulang.")
         return
@@ -183,20 +183,16 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 continue
         context.user_data["last_messages"] = []
 
-        loading_msg = await query.message.reply_text("⏳ Sedang memproses...")
+        loading_msg = await query.message.reply_text("⏳ Sedang memproses JSON...")
         context.user_data["last_messages"].append(loading_msg)
 
-        if query.data == "normal":
-            tgs_file = json_to_tgs(json_bytes)
-            mode = "Normal"
-        elif query.data == "optimize":
-            tgs_file = optimize_json_to_tgs(json_bytes)
-            mode = "Optimized Safe"
-        elif query.data == "reduce":
-            tgs_file = reduce_keyframes_json(json_bytes)
-            mode = "Reduce Keyframes"
+        # Tentukan level compression
+        if query.data.startswith("level_"):
+            level_percent = int(query.data.split("_")[1])
         else:
-            return
+            level_percent = 0
+
+        tgs_file = compress_json_level(json_bytes, level_percent)
 
         await loading_msg.delete()
 
@@ -207,16 +203,24 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sticker_msg = await query.message.reply_sticker(sticker=InputFile(tgs_file, filename="emoji.tgs"))
         context.user_data["last_messages"].append(sticker_msg)
 
-        # Inline keyboard tetap muncul agar user bisa pilih mode lain
+        # Inline keyboard tetap muncul agar user bisa pilih level lain
         keyboard = [
-            [InlineKeyboardButton("🎨 Normal", callback_data="normal"),
-             InlineKeyboardButton("⚡ Optimized Safe", callback_data="optimize")],
-            [InlineKeyboardButton("✂️ Reduce Keyframes", callback_data="reduce"),
-             InlineKeyboardButton("❌ Batal", callback_data="reset")]
+            [
+                InlineKeyboardButton("25% Compression", callback_data="level_25"),
+                InlineKeyboardButton("50% Compression", callback_data="level_50")
+            ],
+            [
+                InlineKeyboardButton("75% Compression", callback_data="level_75"),
+                InlineKeyboardButton("100% Compression", callback_data="level_100")
+            ],
+            [InlineKeyboardButton("❌ Batal", callback_data="reset")]
         ]
 
         info_msg = await query.message.reply_text(
-            f"✅ Mode: *{mode}*\n📦 Size: {size_kb:.2f} KB\n🔑 Keyframes: {keyframes}",
+            f"✅ File TGS berhasil dibuat!\n"
+            f"📦 Size: {size_kb:.2f} KB\n"
+            f"🔑 Keyframes: {keyframes}\n"
+            f"🎚️ Compression Level: {level_percent}%",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
