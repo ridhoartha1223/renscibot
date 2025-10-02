@@ -21,19 +21,25 @@ def json_to_tgs(json_bytes: bytes) -> BytesIO:
     return gzip_bytes(json_bytes)
 
 def optimize_json_level(json_bytes: bytes, level_percent: int) -> BytesIO:
-    """
-    Optimasi JSON dengan menghapus data non-esensial.
-    Level 25/50/75/100 menentukan agresivitas optimasi.
-    Tidak menghapus keyframe (k) dan ks untuk menghindari Unknown Track.
-    """
     data = json.loads(json_bytes.decode("utf-8"))
 
     def clean(obj, level):
         if isinstance(obj, dict):
             new_obj = {}
             for k, v in obj.items():
-                if k in ["layers", "assets", "fr", "op", "ip", "nm", "ks", "k"]:
+                if k in ["layers", "assets", "fr", "op", "ip", "nm"]:
                     new_obj[k] = clean(v, level)
+                    continue
+                if k == "ks" and isinstance(v, dict):
+                    new_obj[k] = {}
+                    for prop, val in v.items():
+                        if isinstance(val, dict) and "k" in val and isinstance(val["k"], list):
+                            # Sampling keyframes sesuai level
+                            step = max(1, int(100 / level))
+                            new_obj[k][prop] = val.copy()
+                            new_obj[k][prop]["k"] = val["k"][::step]
+                        else:
+                            new_obj[k][prop] = val
                     continue
                 if k in ["hd", "a", "bm", "mn", "ix", "cl", "ln", "tt"]:
                     if level >= 25:
@@ -43,7 +49,12 @@ def optimize_json_level(json_bytes: bytes, level_percent: int) -> BytesIO:
         elif isinstance(obj, list):
             return [clean(item, level) for item in obj]
         elif isinstance(obj, float):
-            return round(obj, 3)
+            if level >= 75:
+                return round(obj, 1)
+            elif level >= 50:
+                return round(obj, 2)
+            else:
+                return round(obj, 3)
         return obj
 
     cleaned = clean(data, level_percent)
@@ -85,13 +96,17 @@ def extract_json_info(json_bytes: bytes) -> str:
 
 # -------------------- HANDLERS --------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Tampilan Start lebih keren & interaktif
     keyboard = [
         [InlineKeyboardButton("📄 Kirim JSON", callback_data="send_json")],
+        [InlineKeyboardButton("⚡ Optimize", callback_data="optimize")],
         [InlineKeyboardButton("ℹ️ Bantuan", callback_data="help")]
     ]
     await update.message.reply_text(
-        "👋 Hai! Aku bot untuk mengubah file JSON menjadi emoji Telegram.\n\n"
+        "✨ *Selamat datang di Emoji Creator Bot!* ✨\n\n"
+        "Kamu bisa mengubah file JSON animasi menjadi *emoji Telegram*.\n"
         "Klik tombol di bawah untuk mulai!",
+        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -107,7 +122,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     preview = extract_json_info(json_bytes)
 
-    # Inline keyboard awal setelah upload JSON
+    # Inline keyboard setelah upload JSON
     keyboard = [
         [
             InlineKeyboardButton("🎨 Normal", callback_data="normal"),
@@ -129,16 +144,16 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # ------------------- Bantuan & Navigasi -------------------
+    # Bantuan & navigasi
     if query.data == "help":
         help_text = (
             "ℹ️ *Panduan Penggunaan*\n\n"
             "1. Kirim file `.json` animasi Lottie.\n"
             "2. Pilih metode konversi:\n"
             "   • Normal → Konversi standar\n"
-            "   • Optimize → Optimasi JSON (lebih kecil)\n"
+            "   • Optimize → Optimasi JSON\n"
             "3. Jika pilih Optimize, pilih level % optimasi.\n"
-            "4. Terima hasil `.tgs` sebagai emoji Telegram."
+            "4. Terima hasil `.tgs` sebagai *emoji* Telegram."
         )
         keyboard = [[InlineKeyboardButton("🔙 Kembali ke Menu Utama", callback_data="main")]]
         await query.edit_message_text(help_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -146,6 +161,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "main":
         keyboard = [
             [InlineKeyboardButton("📄 Kirim JSON", callback_data="send_json")],
+            [InlineKeyboardButton("⚡ Optimize", callback_data="optimize")],
             [InlineKeyboardButton("ℹ️ Bantuan", callback_data="help")]
         ]
         await query.edit_message_text(
@@ -160,20 +176,19 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ------------------- Reset -------------------
+    # Reset
     if query.data == "reset":
         context.user_data.clear()
         await query.edit_message_text("✅ Semua data direset. Kirim file baru untuk mulai lagi.")
         return
 
-    # ------------------- Normal / Optimize -------------------
     if "json_bytes" not in context.user_data:
         await query.edit_message_text("❌ File JSON tidak ditemukan. Kirim ulang.")
         return
 
     json_bytes = context.user_data["json_bytes"]
 
-    # Hapus preview hasil convert sebelumnya
+    # Hapus preview lama
     for msg in context.user_data.get("last_messages", []):
         try:
             await msg.delete()
@@ -181,7 +196,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
     context.user_data["last_messages"] = []
 
-    # Normal langsung convert
+    # Normal
     if query.data == "normal":
         tgs_file = json_to_tgs(json_bytes)
         size_kb = len(tgs_file.getvalue()) / 1024
@@ -216,7 +231,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_messages"].append(info_msg)
         return
 
-    # Optimize → tampil level %
+    # Optimize → level %
     if query.data == "optimize":
         keyboard = [
             [
@@ -238,7 +253,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Kembali dari level optimize ke Normal/Optimize
     if query.data == "back_optimize":
         keyboard = [
             [
@@ -250,7 +264,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Pilih metode konversi:", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    # Pilih level optimize
     if query.data.startswith("level_"):
         level_percent = int(query.data.split("_")[1])
         tgs_file = optimize_json_level(json_bytes, level_percent)
