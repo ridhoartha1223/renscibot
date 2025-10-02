@@ -1,73 +1,62 @@
-import os
 import json
-import gzip
 from io import BytesIO
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-# ========= Konversi JSON ke TGS =========
-def convert_json_to_tgs(json_bytes: bytes) -> BytesIO:
-    """Convert JSON -> TGS tanpa optimasi"""
+# ===================== Fungsi Konversi =====================
+
+def convert_json_to_tgs(json_bytes):
+    """Konversi JSON ke TGS tanpa optimasi."""
+    return BytesIO(json_bytes)
+
+def optimize_json_to_tgs(json_bytes):
+    """Optimasi sederhana: hapus whitespace JSON."""
     data = json.loads(json_bytes.decode("utf-8"))
-    compact = json.dumps(data, separators=(',', ':')).encode("utf-8")
+    optimized = json.dumps(data, separators=(",", ":")).encode("utf-8")
+    return BytesIO(optimized)
 
-    buffer = BytesIO()
-    with gzip.GzipFile(fileobj=buffer, mode="w", compresslevel=9) as f:
-        f.write(compact)
-    buffer.seek(0)
-    buffer.name = "result.tgs"
-    return buffer
-
-def optimize_json_to_tgs(json_bytes: bytes) -> BytesIO:
-    """Convert JSON -> TGS optimized (target <64KB untuk emoji premium)"""
+def simplify_keyframes(json_bytes, step=2):
+    """Kurangi jumlah keyframes dengan cara sampling setiap 'step' frame."""
     data = json.loads(json_bytes.decode("utf-8"))
 
-    # Turunkan framerate kalau terlalu tinggi
-    if "fr" in data and data["fr"] > 30:
-        data["fr"] = 30
+    def reduce_keys(keys):
+        if isinstance(keys, list):
+            return keys[::step]  # ambil tiap 'step'
+        return keys
 
-    # Hapus metadata tidak penting
-    if "meta" in data:
-        del data["meta"]
+    # Traverse semua animasi layer
+    if "layers" in data:
+        for layer in data["layers"]:
+            if "ks" in layer:  # transform
+                for k in layer["ks"].values():
+                    if isinstance(k, dict) and "k" in k and isinstance(k["k"], list):
+                        k["k"] = reduce_keys(k["k"])
 
-    # Serialize JSON compact
-    compact = json.dumps(data, separators=(',', ':')).encode("utf-8")
+    optimized = json.dumps(data, separators=(",", ":")).encode("utf-8")
+    return BytesIO(optimized)
 
-    # Gzip ke TGS
-    buffer = BytesIO()
-    with gzip.GzipFile(fileobj=buffer, mode="w", compresslevel=9) as f:
-        f.write(compact)
-    buffer.seek(0)
-    buffer.name = "result_optimized.tgs"
-    return buffer
+# ===========================================================
 
-# ========= Handler =========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Kirim file JSON hasil export Bodymovin (AE).")
+    await update.message.reply_text("👋 Kirim file .json untuk saya konversi jadi emoji animasi (.tgs)")
 
 async def handle_json(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
-    if not doc.file_name.endswith(".json"):
-        await update.message.reply_text("❌ Hanya mendukung file .json dari Bodymovin.")
+    if not doc or not doc.file_name.endswith(".json"):
+        await update.message.reply_text("❌ Harus kirim file JSON")
         return
 
     file = await doc.get_file()
     json_bytes = await file.download_as_bytearray()
-
-    # Simpan ke user_data untuk tombol
     context.user_data["json_bytes"] = json_bytes
 
-    # Kirim tombol pilihan
     keyboard = [
-        [
-            InlineKeyboardButton("📦 JSON → TGS Normal", callback_data="normal"),
-            InlineKeyboardButton("⚡ JSON → TGS Optimized", callback_data="optimize"),
-        ]
+        [InlineKeyboardButton("🔄 JSON ➝ TGS Normal", callback_data="normal")],
+        [InlineKeyboardButton("⚡ JSON ➝ TGS Optimized", callback_data="optimize")],
     ]
-    await update.message.reply_text(
-        "Pilih mode konversi:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text("Pilih mode konversi:", reply_markup=reply_markup)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -82,36 +71,59 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if query.data == "normal":
             tgs_file = convert_json_to_tgs(json_bytes)
             mode = "Normal"
-        else:
+        elif query.data == "optimize":
             tgs_file = optimize_json_to_tgs(json_bytes)
             mode = "Optimized"
+        elif query.data == "reduce_keyframes":
+            tgs_file = simplify_keyframes(json_bytes, step=2)
+            mode = "Reduced Keyframes"
+        else:
+            return
 
-        # ✅ Kirim sebagai animasi sticker
+        # Hitung size file
+        file_size = len(tgs_file.getvalue())
+        size_kb = round(file_size / 1024, 2)
+
+        # ✅ Kirim emoji animasi
         await query.message.reply_sticker(
-            sticker=InputFile(tgs_file, filename=tgs_file.name)
+            sticker=InputFile(tgs_file, filename=f"{mode}.tgs")
         )
 
-        # Reset buffer sebelum dipakai lagi
-        tgs_file.seek(0)
-
-        # ✅ Kirim juga file .tgs (backup)
-        await query.message.reply_document(
-            document=InputFile(tgs_file, filename=tgs_file.name),
-            caption=f"✅ Konversi selesai ({mode})"
-        )
+        if file_size <= 64 * 1024:
+            msg = (
+                f"✅🟢 Konversi selesai ({mode})\n"
+                f"📦 Ukuran file: {size_kb} KB\n\n"
+                f"Siap diunggah sebagai **Emoji Premium** 🚀"
+            )
+            await query.message.reply_text(msg, parse_mode="Markdown")
+        else:
+            msg = (
+                f"❌🔴 Konversi selesai ({mode})\n"
+                f"📦 Ukuran file: {size_kb} KB\n\n"
+                f"⚠️ Ukuran melebihi batas 64KB.\n"
+                f"👉 Pilih opsi optimasi untuk memperkecil file."
+            )
+            keyboard = [
+                [InlineKeyboardButton("✂️ Kurangi Keyframes", callback_data="reduce_keyframes")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text(msg, reply_markup=reply_markup, parse_mode="Markdown")
 
     except Exception as e:
         await query.message.reply_text(f"❌ Gagal convert: {e}")
 
-# ========= Main =========
+# ===================== MAIN =====================
+
 def main():
-    token = os.getenv("BOT_TOKEN")  # set di Railway sebagai env var
-    app = Application.builder().token(token).build()
+    import os
+    TOKEN = os.getenv("BOT_TOKEN")  # ambil token dari Railway ENV
+    app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Document.FileExtension("json"), handle_json))
     app.add_handler(CallbackQueryHandler(button_callback))
 
+    print("🤖 Bot running...")
     app.run_polling()
 
 if __name__ == "__main__":
