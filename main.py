@@ -3,8 +3,15 @@ import tempfile
 import gzip
 import json
 import logging
-from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, InlineQueryHandler, ContextTypes
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes,
+)
 
 # Logging
 logging.basicConfig(
@@ -12,29 +19,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Token dari Railway ENV
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Fungsi konversi JSON -> TGS
+# Fungsi konversi normal
 def convert_json_to_tgs(json_path, tgs_path):
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-
     with gzip.open(tgs_path, "wt", encoding="utf-8") as f:
         json.dump(data, f)
 
-# Start command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Halo! Kirimkan file JSON (Lottie) ke saya, "
-        "nanti otomatis saya convert jadi file .TGS.\n\n"
-        "💡 Inline mode juga tersedia: ketik `@YourBot` di chat."
-    )
+# Fungsi konversi dengan optimize (misal: buang metadata, rapatkan json)
+def convert_json_to_tgs_optimize(json_path, tgs_path):
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-# Handler untuk file JSON
+    # contoh optimize sederhana: sort keys & hilangkan indent
+    with gzip.open(tgs_path, "wt", encoding="utf-8") as f:
+        json.dump(data, f, separators=(",", ":"), sort_keys=True)
+
+# Command start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Kirimkan file JSON ke saya untuk convert jadi TGS!")
+
+# Handler file
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
-
     if not document.file_name.endswith(".json"):
         await update.message.reply_text("⚠️ Harap kirim file dengan format `.json`.")
         return
@@ -42,45 +51,57 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await document.get_file()
     with tempfile.TemporaryDirectory() as tmpdir:
         json_path = os.path.join(tmpdir, document.file_name)
-        tgs_path = os.path.join(tmpdir, "output.tgs")
-
         await file.download_to_drive(json_path)
 
-        try:
-            convert_json_to_tgs(json_path, tgs_path)
+        # Simpan path di context agar bisa dipakai callback button
+        context.user_data["json_path"] = json_path
 
-            # 1. Preview sebagai sticker
-            with open(tgs_path, "rb") as f:
-                await update.message.reply_sticker(f)
+        # Inline keyboard pilihan
+        keyboard = [
+            [
+                InlineKeyboardButton("📂 JSON → TGS", callback_data="normal"),
+                InlineKeyboardButton("⚡ JSON → TGS Optimize", callback_data="optimize"),
+            ]
+        ]
 
-            # 2. Kirim file .tgs untuk diupload manual ke Emoji
-            with open(tgs_path, "rb") as f:
-                await update.message.reply_document(f, filename="emoji.tgs",
-                                                    caption="📂 Ini file TGS kamu.\n"
-                                                            "➡️ Upload ke menu *Emoji Kustom* di Telegram.")
+        await update.message.reply_text(
+            "Pilih mode konversi:", reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-        except Exception as e:
-            await update.message.reply_text(f"❌ Gagal convert: {e}")
+# Callback tombol
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-# Inline query handler
-async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.inline_query.query
-
-    if not query:
+    json_path = context.user_data.get("json_path")
+    if not json_path or not os.path.exists(json_path):
+        await query.edit_message_text("❌ File JSON tidak ditemukan. Kirim ulang.")
         return
 
-    results = [
-        InlineQueryResultArticle(
-            id="1",
-            title="Convert JSON → TGS",
-            description="Gunakan bot ini untuk convert file JSON jadi TGS",
-            input_message_content=InputTextMessageContent(
-                "📂 Kirim file JSON ke bot ini, nanti otomatis dikonversi jadi TGS."
-            ),
-        )
-    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tgs_path = os.path.join(tmpdir, "output.tgs")
 
-    await update.inline_query.answer(results, cache_time=1)
+        try:
+            if query.data == "normal":
+                convert_json_to_tgs(json_path, tgs_path)
+                mode = "Normal"
+            else:
+                convert_json_to_tgs_optimize(json_path, tgs_path)
+                mode = "Optimize"
+
+            # Kirim hasil sebagai preview sticker
+            with open(tgs_path, "rb") as f:
+                await query.message.reply_sticker(f)
+
+            # Kirim juga file TGS as document (untuk simpan / upload emoji)
+            with open(tgs_path, "rb") as f:
+                await query.message.reply_document(
+                    f, filename="result.tgs",
+                    caption=f"✅ Konversi selesai dengan mode *{mode}*"
+                )
+
+        except Exception as e:
+            await query.message.reply_text(f"❌ Gagal convert: {e}")
 
 def main():
     if not BOT_TOKEN:
@@ -90,10 +111,9 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
-    app.add_handler(InlineQueryHandler(inline_query))
+    app.add_handler(CallbackQueryHandler(button_callback))
 
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-
